@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "moneta"
+version = "0.1.0"
+description = "High-performance, fixed-point multi-currency and FX pricing tensor engine based on NumPy. Zero float drift, portfolio revaluation, and banking-grade precision."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+    { name = "Tony" }
+]
+keywords = [
+    "finance", "currency", "money", "forex", "exchange-rate",
+    "fixed-point", "numpy", "quant", "portfolio"
+]
+dependencies = [
+    "numpy>=1.22.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0.0",
+]
+pandas = [
+    "pandas>=1.5.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/moneta"]
