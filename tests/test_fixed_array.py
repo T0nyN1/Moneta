@@ -396,6 +396,32 @@ class TestConstructExact:
         c = F(np.array([Decimal("1"), Decimal("1"), 2], dtype=object))  # 重复值只解析一次
         assert c.mantissa.tolist() == [1, 1, 2]
 
+    def test_sequences_with_fixed_array_elements(self):
+        a = F([F("1.50"), 2])  # 保留元素自身的小数位数
+        assert (a.mantissa.tolist(), a.scale) == ([150, 200], 2)
+        b = F([F([1, 2]), F(["3.5", "4"])])  # 数组元素按 NumPy 规则堆叠
+        assert (b.shape, b.mantissa.tolist(), b.scale) == ((2, 2), [[10, 20], [35, 40]], 1)
+        c = F([[F("0.1"), 2], (3, F("4.25"))])  # 嵌套、list 与 tuple 混用
+        assert (c.mantissa.tolist(), c.scale) == ([[10, 200], [300, 425]], 2)
+        assert F((F("-0.5"),)).mantissa.tolist() == [-5]
+        assert F([F("1.5")], scale=3).mantissa.tolist() == [1500]
+        with pytest.raises(ValueError, match="超出指定 scale"):
+            F([F("1.55")], scale=1)
+        with pytest.raises(ValueError):  # 形状不齐
+            F([F([1, 2]), 3])
+        with pytest.raises(TypeError):  # 非序列的 __array__ 报错不做展开，原样抛出
+            F(Money("1.5", "USD"))
+        # 与 object 数组路径一致
+        obj = np.empty(2, dtype=object)
+        obj[0], obj[1] = F("1.50"), 2
+        assert np.all(F(obj) == a)
+        obj[0] = F([1, 2])
+        with pytest.raises(ValueError, match="必须是标量"):
+            F(obj)
+        # 白名单接受的序列都能参与运算
+        assert (F("1") + [F("1.5"), 2]).mantissa.tolist() == [25, 30]
+        assert (F([F("1.5"), 2]) == [F("1.5"), 2]).tolist() == [True, True]
+
     def test_explicit_scale_pads_or_rejects(self):
         assert F(["1.5", "2.25"], scale=3).mantissa.tolist() == [1500, 2250]
         assert int(F("1.5", scale=3).mantissa) == 1500
@@ -552,7 +578,7 @@ class TestOperandWhitelist:
     @pytest.mark.parametrize("bad", ["1", b"1", True, np.bool_(True), None, object(), {"a": 1}, {1},
                                      np.array(["1"]), np.array([b"1"]), np.array(["1"], dtype=object),
                                      np.array([True]), ["1", 2], (1, "2"), [1, [2, "3"]], np.array([1 + 2j]),
-                                     1 + 2j, Quantity(1, unit=""), Money("1", "USD")])
+                                     1 + 2j, Quantity(1, unit="share"), Money("1", "USD")])
     def test_is_numeric_operand_rejects(self, bad):
         assert F._is_numeric_operand(bad) is False
         assert F._coerce(bad, strict=False) is None
@@ -568,7 +594,7 @@ class TestOperandWhitelist:
             with pytest.raises(TypeError):
                 op()
 
-    @pytest.mark.parametrize("bad", ["1", True, None, Quantity(1, unit="")])
+    @pytest.mark.parametrize("bad", ["1", True, None, Quantity(1, unit="share")])
     def test_comparison_rejects(self, bad):
         assert (F("1") == bad) is False
         assert (F("1") != bad) is True
@@ -597,9 +623,9 @@ class TestOperandWhitelist:
             F("10.5") * object()
 
     def test_unit_objects_never_degrade(self):
-        # str() 恰好能解析成数字（unit 为空）也不能当成无量纲数参与运算
+        # 带单位对象一律不是无量纲数：FixedArray 按数值白名单拒绝，而不是依赖 str() 解析失败
         with pytest.raises(TypeError):
-            F("1") + Quantity(2, unit="")
+            F("1") + Quantity(2, unit="share")
         assert F("2") * Money("3", "USD") == Money("6", "USD")  # 交给 Money.__rmul__
         with pytest.raises(TypeError, match="Money"):
             F("1") < Money("2", "USD")  # 交给 Money.__gt__，由 Money 报错
@@ -1721,7 +1747,7 @@ class TestNumpyProtocol:
     def test_no_implicit_array(self):
         a = F(["0.1"])
         for op in (lambda: np.asarray(a), lambda: np.concatenate([a, a]), lambda: np.array(a, dtype=float),
-                   lambda: F([F("1"), F("2")]), lambda: a.__array__()):
+                   lambda: a.__array__()):
             with pytest.raises(TypeError):
                 op()
 

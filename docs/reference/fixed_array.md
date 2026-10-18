@@ -6,14 +6,14 @@
 结果超出 `int64` 时一定报错，不会静默回绕。
 
 ```python
->> > a = FixedArray(["1.10", "2.25", "-0.05"])
->> > a
+>>> a = FixedArray(["1.10", "2.25", "-0.05"])
+>>> a
 FixedArray([1.10, 2.25, -0.05], scale=2)
->> > a * 2
+>>> a * 2
 FixedArray([2.20, 4.50, -0.10], scale=2)
->> > a.sum()
+>>> a.sum()
 FixedArray(3.30, scale=2)
->> > bool(FixedArray("0.1") + FixedArray("0.2") == FixedArray("0.3"))
+>>> bool(FixedArray("0.1") + FixedArray("0.2") == FixedArray("0.3"))
 True
 ```
 
@@ -33,7 +33,7 @@ $$v = \text{mantissa} \times 10^{-\text{scale}}$$
 `FixedArray` 是 **不可变**的：没有原地运算，`mantissa` 是只读视图，不支持元素赋值，不可哈希
 （不能作为 `dict` 键或放入 `set`）。形状变换、索引、`rescale` 到相同 scale 等操作会直接共享尾数而不复制，
 这正是不可变性带来的好处。`FixedArray` 只认识“数”，不认识币种与单位——带量纲的运算由上层的
-`UnitArray` / `Money` 负责。
+[`UnitArray`](unit_array.md) / [`Money`](money.md) 负责。
 
 ### scale 传播规则
 
@@ -119,6 +119,7 @@ NumPy 的 `int64` 运算在同样的输入上会静默回绕。
 | **内部输入解析**       | [`FixedArray._parse_decimal_str`](#fixedarray_parse_decimal_str)                                                             | 解析十进制字符串为 `(mantissa, scale)`                             |
 |                        | [`FixedArray._parse_fraction`](#fixedarray_parse_fraction)                                                                   | 解析有限十进制 `Fraction` 为 `(mantissa, scale)`                   |
 |                        | [`FixedArray._parse_float_scalar`](#fixedarray_parse_float_scalar)                                                           | 按最短十进制写法（Dragonbox）解析单个浮点数                        |
+|                        | [`FixedArray._expand_nested`](#fixedarray_expand_nested)                                                                     | 将嵌套序列中的 `FixedArray` 替换为等值 `Decimal`（保留小数位数）   |
 |                        | [`FixedArray._parse_object_element`](#fixedarray_parse_object_element)                                                       | 解析单个标量对象为 `(mantissa, scale)`                             |
 |                        | [`FixedArray._parse_float_array`](#fixedarray_parse_float_array)                                                             | 向量化往返试探解析浮点数组为 `(尾数数组, scale)`                   |
 |                        | [`FixedArray._align_mantissas`](#fixedarray_align_mantissas)                                                                 | 将不同 `scale` 的尾数向量化对齐到目标 `target`                     |
@@ -180,31 +181,24 @@ class moneta.RoundingMode(str, Enum)
 **示例**
 
 ```python
->> > from moneta import RoundingMode
->> > x = FixedArray(["2.5", "3.5", "2.4", "-2.5", "-2.6"])
->> > for mode in RoundingMode:
-    ...
-print(f"{mode.value:>9}", x.rescale(0, rounding=mode))
-half_up[3, 4, 2, -3, -3]
-half_even[2, 4, 2, -2, -3]
-down[2, 3, 2, -2, -2]
-up[3, 4, 3, -3, -3]
-floor[2, 3, 2, -3, -3]
-ceil[3, 4, 3, -2, -2]
->> > RoundingMode.HALF_EVEN == "half_even"
+>>> from moneta import RoundingMode
+>>> x = FixedArray(["2.5", "3.5", "2.4", "-2.5", "-2.6"])
+>>> for mode in RoundingMode:
+...     print(f"{mode.value:>9}", x.rescale(0, rounding=mode))
+  half_up [3, 4, 2, -3, -3]
+half_even [2, 4, 2, -2, -3]
+     down [2, 3, 2, -2, -2]
+       up [3, 4, 3, -3, -3]
+    floor [2, 3, 2, -3, -3]
+     ceil [3, 4, 3, -2, -2]
+>>> RoundingMode.HALF_EVEN == "half_even"
 True
->> > FixedArray("0.125").rescale(2, RoundingMode.HALF_EVEN)
+>>> FixedArray("0.125").rescale(2, RoundingMode.HALF_EVEN)
 FixedArray(0.12, scale=2)
->> > FixedArray("0.125").rescale(2, "nearest")
-Traceback(most
-recent
-call
-last):
-...
-ValueError: rounding
-只能是('half_up', 'half_even', 'down', 'up', 'floor', 'ceil')
-之一，收到
-'nearest'
+>>> FixedArray("0.125").rescale(2, "nearest")
+Traceback (most recent call last):
+    ...
+ValueError: rounding 只能是 ('half_up', 'half_even', 'down', 'up', 'floor', 'ceil') 之一，收到 'nearest'
 ```
 
 **另请参阅**
@@ -272,120 +266,92 @@ class moneta.FixedArray(values, scale=None)
 整数、字符串与 `Decimal`：
 
 ```python
->> > FixedArray(5)
+>>> FixedArray(5)
 FixedArray(5, scale=0)
->> > FixedArray(5, scale=2)
+>>> FixedArray(5, scale=2)
 FixedArray(5.00, scale=2)
->> > FixedArray(0, scale=25)  # 全零数组支持超过 18 位的任意 scale
+>>> FixedArray(0, scale=25)  # 全零数组支持超过 18 位的任意 scale
 FixedArray(0.0000000000000000000000000, scale=25)
->> > from decimal import Decimal
->> > FixedArray("1.50")
+>>> from decimal import Decimal
+>>> FixedArray("1.50")
 FixedArray(1.50, scale=2)
->> > FixedArray(Decimal("1.100"))
+>>> FixedArray(Decimal("1.100"))
 FixedArray(1.100, scale=3)
->> > FixedArray("1.5e-3")
+>>> FixedArray("1.5e-3")
 FixedArray(0.0015, scale=4)
->> > FixedArray(" 1_000.50 ")
+>>> FixedArray(" 1_000.50 ")
 FixedArray(1000.50, scale=2)
 ```
 
 浮点数按最短写法解析，数组对齐到最大位数：
 
 ```python
->> > FixedArray(0.1)
+>>> FixedArray(0.1)
 FixedArray(0.1, scale=1)
->> > FixedArray([0.1, 0.25])
+>>> FixedArray([0.1, 0.25])
 FixedArray([0.10, 0.25], scale=2)
->> > FixedArray(np.array([0.1, 2.5], dtype=np.float32))
+>>> FixedArray(np.array([0.1, 2.5], dtype=np.float32))
 FixedArray([0.1, 2.5], scale=1)
->> > FixedArray(2.675, scale=2)  # 在 "2.675" 上 half_up
+>>> FixedArray(2.675, scale=2)  # 在 "2.675" 上 half_up
 FixedArray(2.68, scale=2)
->> > round(2.675, 2)  # 对比：内置 round 受二进制误差影响
+>>> round(2.675, 2)  # 对比：内置 round 受二进制误差影响
 2.67
 ```
 
 显式 `scale` 时每个元素直接舍入，不会因为全精度对齐或无限小数而溢出：
 
 ```python
->> > big_and_fine = np.array([123456789012.5, 0.123456789])
->> > FixedArray(big_and_fine)  # 需对齐到 9 位小数，尾数越界
-Traceback(most
-recent
-call
-last):
-...
-OverflowError: 浮点数需要超过
-7
-位小数，对齐后超出
-int64
-范围
->> > FixedArray(big_and_fine, scale=2)
+>>> big_and_fine = np.array([123456789012.5, 0.123456789])
+>>> FixedArray(big_and_fine)  # 需对齐到 9 位小数，尾数越界
+Traceback (most recent call last):
+    ...
+OverflowError: 浮点数需要超过 7 位小数，对齐后超出 int64 范围
+>>> FixedArray(big_and_fine, scale=2)
 FixedArray([123456789012.50, 0.12], scale=2)
->> > FixedArray(np.array([100000.0, 1 / 3]), scale=2)
+>>> FixedArray(np.array([100000.0, 1 / 3]), scale=2)
 FixedArray([100000.00, 0.33], scale=2)
 ```
 
 `Fraction`、混合类型与另一个 `FixedArray`：
 
 ```python
->> > from fractions import Fraction
->> > FixedArray(Fraction(3, 8))
+>>> from fractions import Fraction
+>>> FixedArray(Fraction(3, 8))
 FixedArray(0.375, scale=3)
->> > FixedArray([1, Decimal("2.5"), "0.125"])
+>>> FixedArray([1, Decimal("2.5"), "0.125"])
 FixedArray([1.000, 2.500, 0.125], scale=3)
->> > FixedArray(FixedArray("1.25"), scale=1)  # 等价于 rescale(1)
+>>> FixedArray([FixedArray("1.50"), 2])      # 序列中含 FixedArray 元素，自动保留各自 scale
+FixedArray([1.50, 2.00], scale=2)
+>>> FixedArray([FixedArray([1, 2]), FixedArray(["3.5", "4"])])  # 相同形状的 FixedArray 沿首维堆叠
+FixedArray([[1.0, 2.0],
+            [3.5, 4.0]], scale=1)
+>>> FixedArray(FixedArray("1.25"), scale=1)  # 等价于 rescale(1)
 FixedArray(1.3, scale=1)
 ```
 
 非法输入：
 
 ```python
->> > FixedArray(Fraction(1, 3))
-Traceback(most
-recent
-call
-last):
-...
-ValueError: 1 / 3
-不是有限小数
->> > FixedArray("1.234", scale=2)
-Traceback(most
-recent
-call
-last):
-...
-ValueError: 输入的小数位数(3)
-超出指定
-scale(2)
->> > FixedArray(float("nan"))
-Traceback(most
-recent
-call
-last):
-...
-ValueError: FixedArray
-不能包含
-NaN
-或无穷大
->> > FixedArray(True)
-Traceback(most
-recent
-call
-last):
-...
-TypeError: 不支持从
-bool(dtype=bool)
-构造
-FixedArray
->> > FixedArray(2 ** 63)
-Traceback(most
-recent
-call
-last):
-...
-OverflowError: 整数超出
-int64
-范围
+>>> FixedArray(Fraction(1, 3))
+Traceback (most recent call last):
+    ...
+ValueError: 1/3 不是有限小数
+>>> FixedArray("1.234", scale=2)
+Traceback (most recent call last):
+    ...
+ValueError: 输入的小数位数 (3) 超出指定 scale (2)
+>>> FixedArray(float("nan"))
+Traceback (most recent call last):
+    ...
+ValueError: FixedArray 不能包含 NaN 或无穷大
+>>> FixedArray(True)
+Traceback (most recent call last):
+    ...
+TypeError: 不支持从 bool (dtype=bool) 构造 FixedArray
+>>> FixedArray(2 ** 63)
+Traceback (most recent call last):
+    ...
+OverflowError: 整数超出 int64 范围
 ```
 
 **性能对比**
@@ -439,21 +405,17 @@ FixedArray.mantissa
 **示例**
 
 ```python
->> > a = FixedArray(["1.50", "-2.25"])
->> > a.mantissa
-array([150, -225])
->> > FixedArray("19.99").mantissa
+>>> a = FixedArray(["1.50", "-2.25"])
+>>> a.mantissa
+array([ 150, -225])
+>>> FixedArray("19.99").mantissa
 array(1999)
->> > a.mantissa[0] = 0
-Traceback(most
-recent
-call
-last):
-...
-ValueError: assignment
-destination is read - only
->> > prices = FixedArray(["10.05", "10.20", "9.95"])
->> > prices[int(np.argmax(prices.mantissa))]
+>>> a.mantissa[0] = 0
+Traceback (most recent call last):
+    ...
+ValueError: assignment destination is read-only
+>>> prices = FixedArray(["10.05", "10.20", "9.95"])
+>>> prices[int(np.argmax(prices.mantissa))]
 FixedArray(10.20, scale=2)
 ```
 
@@ -482,11 +444,11 @@ FixedArray.scale
 **示例**
 
 ```python
->> > FixedArray("1.50").scale
+>>> FixedArray("1.50").scale
 2
->> > FixedArray(7).scale
+>>> FixedArray(7).scale
 0
->> > FixedArray([0.1, 0.125]).scale
+>>> FixedArray([0.1, 0.125]).scale
 3
 ```
 
@@ -515,9 +477,9 @@ FixedArray.shape
 **示例**
 
 ```python
->> > FixedArray([[1, 2, 3], [4, 5, 6]]).shape
+>>> FixedArray([[1, 2, 3], [4, 5, 6]]).shape
 (2, 3)
->> > FixedArray("1.5").shape
+>>> FixedArray("1.5").shape
 ()
 ```
 
@@ -546,9 +508,9 @@ FixedArray.ndim
 **示例**
 
 ```python
->> > FixedArray("1.5").ndim
+>>> FixedArray("1.5").ndim
 0
->> > FixedArray([[1, 2], [3, 4]]).ndim
+>>> FixedArray([[1, 2], [3, 4]]).ndim
 2
 ```
 
@@ -576,9 +538,9 @@ FixedArray.size
 **示例**
 
 ```python
->> > FixedArray([[1, 2, 3], [4, 5, 6]]).size
+>>> FixedArray([[1, 2, 3], [4, 5, 6]]).size
 6
->> > FixedArray("1.5").size
+>>> FixedArray("1.5").size
 1
 ```
 
@@ -606,7 +568,7 @@ FixedArray.dtype
 **示例**
 
 ```python
->> > FixedArray("1.5").dtype
+>>> FixedArray("1.5").dtype
 dtype('int64')
 ```
 
@@ -634,7 +596,7 @@ FixedArray.T
 **示例**
 
 ```python
->> > FixedArray([["1.1", "2.2", "3.3"], ["4.4", "5.5", "6.6"]]).T
+>>> FixedArray([["1.1", "2.2", "3.3"], ["4.4", "5.5", "6.6"]]).T
 FixedArray([[1.1, 4.4],
             [2.2, 5.5],
             [3.3, 6.6]], scale=1)
@@ -675,10 +637,10 @@ FixedArray([[1.1, 4.4],
 **示例**
 
 ```python
->> > a = FixedArray(["1.5", "-2"])
->> > -a
+>>> a = FixedArray(["1.5", "-2"])
+>>> -a
 FixedArray([-1.5, 2.0], scale=1)
->> > (+a) is a
+>>> (+a) is a
 True
 ```
 
@@ -722,19 +684,12 @@ abs(a)
 **示例**
 
 ```python
->> > abs(FixedArray(["-1.5", "2"]))
+>>> abs(FixedArray(["-1.5", "2"]))
 FixedArray([1.5, 2.0], scale=1)
->> > np.abs(FixedArray("-1.5"))
-Traceback(most
-recent
-call
-last):
-...
-TypeError: operand
-'FixedArray'
-does
-not support
-ufuncs(__array_ufunc__=None)
+>>> np.abs(FixedArray("-1.5"))
+Traceback (most recent call last):
+    ...
+TypeError: operand 'FixedArray' does not support ufuncs (__array_ufunc__=None)
 ```
 
 **性能对比**
@@ -786,47 +741,34 @@ scale 相同时省去对齐，速度最快。
 **示例**
 
 ```python
->> > FixedArray("1.10") + FixedArray("0.005")
+>>> FixedArray("1.10") + FixedArray("0.005")
 FixedArray(1.105, scale=3)
->> > 0.1 + 0.2  # 浮点误差
+>>> 0.1 + 0.2  # 浮点误差
 0.30000000000000004
->> > FixedArray(0.1) + 0.2  # float 操作数按最短写法解析
+>>> FixedArray(0.1) + 0.2  # float 操作数按最短写法解析
 FixedArray(0.3, scale=1)
->> > FixedArray(["100.00", "50.00"]) - FixedArray("0.01")
+>>> FixedArray(["100.00", "50.00"]) - FixedArray("0.01")
 FixedArray([99.99, 49.99], scale=2)
->> > 10 - FixedArray("0.01")  # 反向运算
+>>> 10 - FixedArray("0.01")  # 反向运算
 FixedArray(9.99, scale=2)
->> > FixedArray([[1], [2]]) + FixedArray([10, 20])  # 广播
+>>> FixedArray([[1], [2]]) + FixedArray([10, 20])  # 广播
 FixedArray([[11, 21],
             [12, 22]], scale=0)
->> > np.array([1, 2]) + FixedArray("0.5")  # ndarray 在左侧也返回 FixedArray
+>>> np.array([1, 2]) + FixedArray("0.5")  # ndarray 在左侧也返回 FixedArray
 FixedArray([1.5, 2.5], scale=1)
->> > FixedArray(1) + "1"
-Traceback(most
-recent
-call
-last):
-...
-TypeError: unsupported
-operand
-type(s)
-for +: 'FixedArray' and 'str'
+>>> FixedArray(1) + "1"
+Traceback (most recent call last):
+    ...
+TypeError: unsupported operand type(s) for +: 'FixedArray' and 'str'
 ```
 
 对齐 scale 也可能溢出——`10**17` 在 scale 2 下的尾数是 `10**19`：
 
 ```python
->> > FixedArray(10 ** 17) + FixedArray("0.01")
-Traceback(most
-recent
-call
-last):
-...
-OverflowError: 乘以
-10 ^ 2
-后超出
-int64
-范围
+>>> FixedArray(10 ** 17) + FixedArray("0.01")
+Traceback (most recent call last):
+    ...
+OverflowError: 乘以 10^2 后超出 int64 范围
 ```
 
 **性能对比**
@@ -895,25 +837,20 @@ a * b
 **示例**
 
 ```python
->> > FixedArray("19.99") * 3
+>>> FixedArray("19.99") * 3
 FixedArray(59.97, scale=2)
->> > FixedArray("1.25") * FixedArray("0.5")
+>>> FixedArray("1.25") * FixedArray("0.5")
 FixedArray(0.625, scale=3)
->> > FixedArray("1.1") * 1.1
+>>> FixedArray("1.1") * 1.1
 FixedArray(1.21, scale=2)
->> > 1.1 * 1.1
+>>> 1.1 * 1.1
 1.2100000000000002
->> > FixedArray("1.01") * FixedArray("1.01") * FixedArray("1.01")  # scale 累加
+>>> FixedArray("1.01") * FixedArray("1.01") * FixedArray("1.01")  # scale 累加
 FixedArray(1.030301, scale=6)
->> > FixedArray(10 ** 10) * FixedArray(10 ** 10)
-Traceback(most
-recent
-call
-last):
-...
-OverflowError: 乘法结果超出
-int64
-范围
+>>> FixedArray(10 ** 10) * FixedArray(10 ** 10)
+Traceback (most recent call last):
+    ...
+OverflowError: 乘法结果超出 int64 范围
 ```
 
 **性能对比**
@@ -969,45 +906,35 @@ FixedArray.mul_round(other, scale=None, rounding="half_up")
 **示例**
 
 ```python
->> > amount = FixedArray("100.00")
->> > rate = FixedArray("0.0325")
->> > amount.mul_round(rate)  # 默认 scale = max(2, 4)
+>>> amount = FixedArray("100.00")
+>>> rate = FixedArray("0.0325")
+>>> amount.mul_round(rate)  # 默认 scale = max(2, 4)
 FixedArray(3.2500, scale=4)
->> > amount.mul_round(rate, scale=2)
+>>> amount.mul_round(rate, scale=2)
 FixedArray(3.25, scale=2)
->> > FixedArray("2.5").mul_round(FixedArray("0.5"), scale=1)  # 1.25 → half_up
+>>> FixedArray("2.5").mul_round(FixedArray("0.5"), scale=1)  # 1.25 → half_up
 FixedArray(1.3, scale=1)
->> > FixedArray("2.5").mul_round(FixedArray("0.5"), scale=1, rounding="half_even")  # 1.25 → half_even
+>>> FixedArray("2.5").mul_round(FixedArray("0.5"), scale=1, rounding="half_even")  # 1.25 → half_even
 FixedArray(1.2, scale=1)
->> > FixedArray("1.25").mul_round(2, scale=5, rounding=None)  # 不舍入，扩大 scale
+>>> FixedArray("1.25").mul_round(2, scale=5, rounding=None)  # 不舍入，扩大 scale
 FixedArray(2.50000, scale=5)
 ```
 
 中间乘积超出 `int64`、但结果在范围内时，`*` 报错而 `mul_round` 给出正确答案：
 
 ```python
->> > notional = FixedArray("12345678901.123456")  # 尾数约 1.2e16
->> > fx = FixedArray("1.234567")  # 尾数约 1.2e6，乘积尾数约 1.5e22
->> > notional * fx
-Traceback(most
-recent
-call
-last):
-...
-OverflowError: 乘法结果超出
-int64
-范围
->> > notional.mul_round(fx, scale=6)  # 精确值 15241567763.923281703552
+>>> notional = FixedArray("12345678901.123456")  # 尾数约 1.2e16
+>>> fx = FixedArray("1.234567")  # 尾数约 1.2e6，乘积尾数约 1.5e22
+>>> notional * fx
+Traceback (most recent call last):
+    ...
+OverflowError: 乘法结果超出 int64 范围
+>>> notional.mul_round(fx, scale=6)  # 精确值 15241567763.923281703552
 FixedArray(15241567763.923282, scale=6)
->> > FixedArray("1.25").mul_round(FixedArray("1.5"), scale=1, rounding=None)
-Traceback(most
-recent
-call
-last):
-...
-ValueError: rounding = None
-时不支持缩小
-scale（需要指定舍入模式）
+>>> FixedArray("1.25").mul_round(FixedArray("1.5"), scale=1, rounding=None)
+Traceback (most recent call last):
+    ...
+ValueError: rounding=None 时不支持缩小 scale（需要指定舍入模式）
 ```
 
 **性能对比**
@@ -1071,22 +998,18 @@ a / b
 **示例**
 
 ```python
->> > FixedArray("10.00") / 3
+>>> FixedArray("10.00") / 3
 FixedArray(3.33, scale=2)
->> > FixedArray(["10.00", "20.00", "30.00"]) / FixedArray([3, 6, 7])
+>>> FixedArray(["10.00", "20.00", "30.00"]) / FixedArray([3, 6, 7])
 FixedArray([3.33, 3.33, 4.29], scale=2)
->> > 1 / FixedArray("4.00")
+>>> 1 / FixedArray("4.00")
 FixedArray(0.25, scale=2)
->> > FixedArray(1) / 3  # 整数 / 整数 → scale 0
+>>> FixedArray(1) / 3  # 整数 / 整数 → scale 0
 FixedArray(0, scale=0)
->> > FixedArray(1) / 0
-Traceback(most
-recent
-call
-last):
-...
-ZeroDivisionError: 除数包含
-0
+>>> FixedArray(1) / 0
+Traceback (most recent call last):
+    ...
+ZeroDivisionError: 除数包含 0
 ```
 
 **性能对比**
@@ -1150,32 +1073,32 @@ FixedArray.divide(other, scale=None, rounding="half_up")
 **示例**
 
 ```python
->> > FixedArray("10").divide(3, scale=4)
+>>> FixedArray("10").divide(3, scale=4)
 FixedArray(3.3333, scale=4)
->> > FixedArray(2).divide(3, scale=2, rounding="down")
+>>> FixedArray(2).divide(3, scale=2, rounding="down")
 FixedArray(0.66, scale=2)
->> > FixedArray(2).divide(3, scale=2, rounding="up")
+>>> FixedArray(2).divide(3, scale=2, rounding="up")
 FixedArray(0.67, scale=2)
->> > FixedArray(-1).divide(8, scale=2)  # -0.125，half_up 远离零
+>>> FixedArray(-1).divide(8, scale=2)  # -0.125，half_up 远离零
 FixedArray(-0.13, scale=2)
->> > FixedArray(-1).divide(8, scale=2, rounding="half_even")
+>>> FixedArray(-1).divide(8, scale=2, rounding="half_even")
 FixedArray(-0.12, scale=2)
 ```
 
 按 USD/CNY 汇率 7.1234 把人民币金额折算为美元（银行家舍入到分）：
 
 ```python
->> > cny = FixedArray(["100.00", "250.00"])
->> > cny.divide(FixedArray("7.1234"), scale=2, rounding="half_even")
+>>> cny = FixedArray(["100.00", "250.00"])
+>>> cny.divide(FixedArray("7.1234"), scale=2, rounding="half_even")
 FixedArray([14.04, 35.10], scale=2)
 ```
 
 被除数或除数尾数接近 `int64` 上限时也能精确计算：
 
 ```python
->> > FixedArray("92233720368.54775807").divide(FixedArray("0.00000001"), scale=0)
+>>> FixedArray("92233720368.54775807").divide(FixedArray("0.00000001"), scale=0)
 FixedArray(9223372036854775807, scale=0)
->> > FixedArray(1).divide(FixedArray(2 ** 62), scale=20)  # 除数 > int64 上限 / 10
+>>> FixedArray(1).divide(FixedArray(2 ** 62), scale=20)  # 除数 > int64 上限 / 10
 FixedArray(0.00000000000000000022, scale=20)
 ```
 
@@ -1236,22 +1159,22 @@ divmod(a, b)
 **示例**
 
 ```python
->> > FixedArray("7.5") // 2
+>>> FixedArray("7.5") // 2
 3
->> > FixedArray("-7.5") // 2  # 向负无穷
+>>> FixedArray("-7.5") // 2  # 向负无穷
 -4
->> > FixedArray(["7.5", "8.5"]) // FixedArray("2.5")
+>>> FixedArray(["7.5", "8.5"]) // FixedArray("2.5")
 array([3, 3])
->> > FixedArray("7.5") % 2
+>>> FixedArray("7.5") % 2
 FixedArray(1.5, scale=1)
->> > FixedArray("-7.5") % 2  # 与除数同号
+>>> FixedArray("-7.5") % 2  # 与除数同号
 FixedArray(0.5, scale=1)
->> > FixedArray("7.5") % -2
+>>> FixedArray("7.5") % -2
 FixedArray(-0.5, scale=1)
->> > divmod(FixedArray("1000.00"), FixedArray("3.30"))  # 1000 元能买几份 3.30 元的商品、找零多少
+>>> divmod(FixedArray("1000.00"), FixedArray("3.30"))  # 1000 元能买几份 3.30 元的商品、找零多少
 (303, FixedArray(0.10, scale=2))
->> > a, b = FixedArray("-7.5"), FixedArray(2)
->> > bool((a // b) * b + a % b == a)
+>>> a, b = FixedArray("-7.5"), FixedArray(2)
+>>> bool((a // b) * b + a % b == a)
 True
 ```
 
@@ -1316,35 +1239,30 @@ a @ b
 两个组合（行）持有三种资产（列）的数量，乘以资产价格得到组合市值：
 
 ```python
->> > qty = FixedArray([[100, 200, 0],
-                       ...[0, 50, 300]])
->> > price = FixedArray(["10.25", "3.10", "99.99"])
->> > qty @ price
+>>> qty = FixedArray([[100, 200, 0],
+...                   [0, 50, 300]])
+>>> price = FixedArray(["10.25", "3.10", "99.99"])
+>>> qty @ price
 FixedArray([1645.00, 30152.00], scale=2)
->> > FixedArray([["1.5", "2"], ["0", "1"]]) @ FixedArray([[2, 0], [1, 1]])
+>>> FixedArray([["1.5", "2"], ["0", "1"]]) @ FixedArray([[2, 0], [1, 1]])
 FixedArray([[5.0, 2.0],
             [1.0, 1.0]], scale=1)
->> > batch = FixedArray(np.ones((4, 2, 3), dtype=np.int64))
->> > (batch @ FixedArray(np.ones((3, 5), dtype=np.int64))).shape
+>>> batch = FixedArray(np.ones((4, 2, 3), dtype=np.int64))
+>>> (batch @ FixedArray(np.ones((3, 5), dtype=np.int64))).shape
 (4, 2, 5)
 ```
 
 结果越界时报错，而 NumPy 的 `int64` 矩阵乘法静默回绕；逐项乘积很大但正负相抵时，能给出正确结果：
 
 ```python
->> > x = 3_037_000_499  # x**2 ≈ 9.22e18，刚好在 int64 内
->> > FixedArray([[x, x]]) @ FixedArray([[x], [x]])
-Traceback(most
-recent
-call
-last):
-...
-OverflowError: 矩阵乘法结果超出
-int64
-范围
->> > np.array([[x, x]]) @ np.array([[x], [x]])  # 错误结果，没有任何警告
+>>> x = 3_037_000_499  # x**2 ≈ 9.22e18，刚好在 int64 内
+>>> FixedArray([[x, x]]) @ FixedArray([[x], [x]])
+Traceback (most recent call last):
+    ...
+OverflowError: 矩阵乘法结果超出 int64 范围
+>>> np.array([[x, x]]) @ np.array([[x], [x]])  # 错误结果，没有任何警告
 array([[-11857053614]])
->> > FixedArray([[x, x]]) @ FixedArray([[x], [-x]])
+>>> FixedArray([[x, x]]) @ FixedArray([[x], [-x]])
 FixedArray([[0]], scale=0)
 ```
 
@@ -1391,15 +1309,15 @@ FixedArray.matmul(other, scale=None, rounding="half_up")
 **示例**
 
 ```python
->> > w = FixedArray(["0.333", "0.333", "0.334"])  # 权重，scale 3
->> > v = FixedArray(["100.01", "200.02", "300.03"])  # 价格，scale 2
->> > w @ v  # 精确，scale 5
+>>> w = FixedArray(["0.333", "0.333", "0.334"])  # 权重，scale 3
+>>> v = FixedArray(["100.01", "200.02", "300.03"])  # 价格，scale 2
+>>> w @ v  # 精确，scale 5
 FixedArray(200.12001, scale=5)
->> > w.matmul(v)  # 默认 scale = max(3, 2)
+>>> w.matmul(v)  # 默认 scale = max(3, 2)
 FixedArray(200.120, scale=3)
->> > w.matmul(v, scale=2)
+>>> w.matmul(v, scale=2)
 FixedArray(200.12, scale=2)
->> > w.matmul(v, scale=6, rounding=None)  # 不舍入，扩大 scale
+>>> w.matmul(v, scale=6, rounding=None)  # 不舍入，扩大 scale
 FixedArray(200.120010, scale=6)
 ```
 
@@ -1467,38 +1385,33 @@ FixedArray.sum(axis=None, keepdims=False, out=None, dtype=None)
 **示例**
 
 ```python
->> > m = FixedArray([["1.10", "2.20"],
-                     ...["3.30", "4.40"]])
->> > m.sum()
+>>> m = FixedArray([["1.10", "2.20"],
+...                   ["3.30", "4.40"]])
+>>> m.sum()
 FixedArray(11.00, scale=2)
->> > m.sum(axis=0)
+>>> m.sum(axis=0)
 FixedArray([4.40, 6.60], scale=2)
->> > m.sum(axis=1, keepdims=True)
+>>> m.sum(axis=1, keepdims=True)
 FixedArray([[3.30],
             [7.70]], scale=2)
->> > np.sum(m, axis=0)  # 转发到 m.sum(axis=0)
+>>> np.sum(m, axis=0)  # 转发到 m.sum(axis=0)
 FixedArray([4.40, 6.60], scale=2)
->> > float(np.array([0.1, 0.1, 0.1]).sum())
+>>> float(np.array([0.1, 0.1, 0.1]).sum())
 0.30000000000000004
->> > FixedArray([0.1, 0.1, 0.1]).sum()
+>>> FixedArray([0.1, 0.1, 0.1]).sum()
 FixedArray(0.3, scale=1)
 ```
 
 溢出一定报错，而不是像 NumPy `int64` 那样回绕：
 
 ```python
->> > FixedArray([2 ** 62, 2 ** 62]).sum()
-Traceback(most
-recent
-call
-last):
-...
-OverflowError: 求和结果超出
-int64
-范围
->> > np.array([2 ** 62, 2 ** 62]).sum()
+>>> FixedArray([2 ** 62, 2 ** 62]).sum()
+Traceback (most recent call last):
+    ...
+OverflowError: 求和结果超出 int64 范围
+>>> np.array([2 ** 62, 2 ** 62]).sum()
 -9223372036854775808
->> > FixedArray([2 ** 62, 2 ** 62, -2 ** 62]).sum()  # 部分和越界、结果在范围内
+>>> FixedArray([2 ** 62, 2 ** 62, -2 ** 62]).sum()  # 部分和越界、结果在范围内
 FixedArray(4611686018427387904, scale=0)
 ```
 
@@ -1568,31 +1481,28 @@ FixedArray.mean(axis=None, keepdims=False, scale=None, rounding="half_up", out=N
 **示例**
 
 ```python
->> > b = FixedArray(["1.00", "2.00", "4.00"])
->> > b.mean()  # 7/3 = 2.333…，保留 2 位
+>>> b = FixedArray(["1.00", "2.00", "4.00"])
+>>> b.mean()  # 7/3 = 2.333…，保留 2 位
 FixedArray(2.33, scale=2)
->> > b.mean(scale=4)
+>>> b.mean(scale=4)
 FixedArray(2.3333, scale=4)
->> > b.mean(scale=1, rounding="down")
+>>> b.mean(scale=1, rounding="down")
 FixedArray(2.3, scale=1)
->> > c = FixedArray([1, 2, 3, 4])
->> > c.mean()  # 2.5 → half_up
+>>> c = FixedArray([1, 2, 3, 4])
+>>> c.mean()  # 2.5 → half_up
 FixedArray(3, scale=0)
->> > c.mean(rounding="half_even")
+>>> c.mean(rounding="half_even")
 FixedArray(2, scale=0)
->> > c.mean(scale=1)
+>>> c.mean(scale=1)
 FixedArray(2.5, scale=1)
->> > d = FixedArray([[1, 2], [3, 4]])
->> > d.mean(axis=1, scale=1)
+>>> d = FixedArray([[1, 2], [3, 4]])
+>>> d.mean(axis=1, scale=1)
 FixedArray([1.5, 3.5], scale=1)
->> > np.mean(d, axis=1)  # 注意：scale 仍为 0
+>>> np.mean(d, axis=1)  # 注意：scale 仍为 0
 FixedArray([2, 4], scale=0)
->> > FixedArray(np.array([], dtype=np.int64)).mean()
-Traceback(most
-recent
-call
-last):
-...
+>>> FixedArray(np.array([], dtype=np.int64)).mean()
+Traceback (most recent call last):
+    ...
 ZeroDivisionError: 空数组没有均值
 ```
 
@@ -1654,32 +1564,25 @@ FixedArray.rescale(new_scale, rounding="half_up")
 **示例**
 
 ```python
->> > a = FixedArray("1.25")
->> > a.rescale(4)
+>>> a = FixedArray("1.25")
+>>> a.rescale(4)
 FixedArray(1.2500, scale=4)
->> > a.rescale(1)
+>>> a.rescale(1)
 FixedArray(1.3, scale=1)
->> > a.rescale(1, rounding="half_even")
+>>> a.rescale(1, rounding="half_even")
 FixedArray(1.2, scale=1)
->> > a.rescale(2) is a
+>>> a.rescale(2) is a
 True
->> > FixedArray(["1.005", "2.675", "-0.125"]).rescale(2)
+>>> FixedArray(["1.005", "2.675", "-0.125"]).rescale(2)
 FixedArray([1.01, 2.68, -0.13], scale=2)
->> > np.round([1.005, 2.675, -0.125], 2)
-array([1., 2.68, -0.12])
->> > FixedArray("0.5000000000000000000").rescale(0)  # 一次缩小 19 位
+>>> np.round([1.005, 2.675, -0.125], 2)
+array([ 1.  ,  2.68, -0.12])
+>>> FixedArray("0.5000000000000000000").rescale(0)  # 一次缩小 19 位
 FixedArray(1, scale=0)
->> > FixedArray(10 ** 17).rescale(2)
-Traceback(most
-recent
-call
-last):
-...
-OverflowError: 乘以
-10 ^ 2
-后超出
-int64
-范围
+>>> FixedArray(10 ** 17).rescale(2)
+Traceback (most recent call last):
+    ...
+OverflowError: 乘以 10^2 后超出 int64 范围
 ```
 
 **性能对比**
@@ -1734,35 +1637,25 @@ FixedArray.round_to_step(step, rounding="half_up")
 **示例**
 
 ```python
->> > px = FixedArray(["10.02", "10.03", "10.07"])
->> > px.round_to_step(FixedArray("0.05"))
+>>> px = FixedArray(["10.02", "10.03", "10.07"])
+>>> px.round_to_step(FixedArray("0.05"))
 FixedArray([10.00, 10.05, 10.05], scale=2)
->> > px.round_to_step(0.05)  # float 步长按最短写法解析为 0.05
+>>> px.round_to_step(0.05)  # float 步长按最短写法解析为 0.05
 FixedArray([10.00, 10.05, 10.05], scale=2)
->> > FixedArray([150, 249, 251]).round_to_step(100, rounding="floor")  # 向下取整到 100 股一手
+>>> FixedArray([150, 249, 251]).round_to_step(100, rounding="floor")  # 向下取整到 100 股一手
 FixedArray([100, 200, 200], scale=0)
->> > FixedArray(["10.02", "100.3"]).round_to_step(FixedArray(["0.05", "0.5"]))  # 每个元素不同步长
+>>> FixedArray(["10.02", "100.3"]).round_to_step(FixedArray(["0.05", "0.5"]))  # 每个元素不同步长
 FixedArray([10.00, 100.50], scale=2)
->> > FixedArray(["0.125", "0.375"]).round_to_step(FixedArray("0.25"), rounding="half_even")
+>>> FixedArray(["0.125", "0.375"]).round_to_step(FixedArray("0.25"), rounding="half_even")
 FixedArray([0.000, 0.500], scale=3)
->> > px.round_to_step("0.05")
-Traceback(most
-recent
-call
-last):
-...
-TypeError: FixedArray
-只能与数值类型运算、比较或对齐，收到
-str
->> > px.round_to_step(0)
-Traceback(most
-recent
-call
-last):
-...
-ValueError: 步长
-step
-必须为正数
+>>> px.round_to_step("0.05")
+Traceback (most recent call last):
+    ...
+TypeError: FixedArray 只能与数值类型运算、比较或对齐，收到 str
+>>> px.round_to_step(0)
+Traceback (most recent call last):
+    ...
+ValueError: 步长 step 必须为正数
 ```
 
 **性能对比**
@@ -1811,13 +1704,13 @@ FixedArray.is_on_step(step)
 **示例**
 
 ```python
->> > FixedArray(["10.05", "10.07"]).is_on_step(FixedArray("0.05"))
-array([True, False])
->> > FixedArray("10.05").is_on_step(0.05)
+>>> FixedArray(["10.05", "10.07"]).is_on_step(FixedArray("0.05"))
+array([ True, False])
+>>> FixedArray("10.05").is_on_step(0.05)
 True
->> > FixedArray("-10.05").is_on_step(FixedArray("0.05"))
+>>> FixedArray("-10.05").is_on_step(FixedArray("0.05"))
 True
->> > 10.05 % 0.05 == 0  # float 取余的误差
+>>> 10.05 % 0.05 == 0  # float 取余的误差
 False
 ```
 
@@ -1861,37 +1754,27 @@ a != b
 **示例**
 
 ```python
->> > bool(FixedArray("1.10") == FixedArray("1.1"))
+>>> bool(FixedArray("1.10") == FixedArray("1.1"))
 True
->> > FixedArray(["1.5", "2.0"]) == FixedArray([1.5, 2])
-array([True, True])
->> > np.array([1, 2]) == FixedArray(["1.0", "2.5"])  # ndarray 在左侧
-array([True, False])
->> > FixedArray(1) == "1"
+>>> FixedArray(["1.5", "2.0"]) == FixedArray([1.5, 2])
+array([ True,  True])
+>>> np.array([1, 2]) == FixedArray(["1.0", "2.5"])  # ndarray 在左侧
+array([ True, False])
+>>> FixedArray(1) == "1"
 False
->> > FixedArray(1) != "1"
+>>> FixedArray(1) != "1"
 True
->> > FixedArray(1) == True  # bool 不是合法的数值操作数
+>>> FixedArray(1) == True  # bool 不是合法的数值操作数
 False
->> > FixedArray(1) == float("nan")
+>>> FixedArray(1) == float("nan")
 False
->> > pair = FixedArray([1, 2])
->> > if pair == FixedArray([1, 2]):
+>>> pair = FixedArray([1, 2])
+>>> if pair == FixedArray([1, 2]):
+...     pass
+Traceback (most recent call last):
     ...
-pass
-Traceback(most
-recent
-call
-last):
-...
-ValueError: The
-truth
-value
-of
-an
-array
-with more than one element is ambiguous.Use a.any() or a.all()
->> > bool((pair == FixedArray([1, 2])).all())
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+>>> bool((pair == FixedArray([1, 2])).all())
 True
 ```
 
@@ -1945,27 +1828,19 @@ a >= b
 **示例**
 
 ```python
->> > FixedArray(["1", "2", "3"]) > 1.5
+>>> FixedArray(["1", "2", "3"]) > 1.5
 array([False, True, True])
->> > FixedArray(["0.1", "0.2"]) <= Decimal("0.1")
-array([True, False])
->> > 1.5 < FixedArray(["1", "2"])  # 反向比较
+>>> FixedArray(["0.1", "0.2"]) <= Decimal("0.1")
+array([ True, False])
+>>> 1.5 < FixedArray(["1", "2"])  # 反向比较
 array([False, True])
->> > p = FixedArray(["9.99", "10.01", "12.50"])
->> > p[p > 10]
+>>> p = FixedArray(["9.99", "10.01", "12.50"])
+>>> p[p > 10]
 FixedArray([10.01, 12.50], scale=2)
->> > FixedArray(1) < "1"
-Traceback(most
-recent
-call
-last):
-...
-TypeError: '<'
-not supported
-between
-instances
-of
-'FixedArray' and 'str'
+>>> FixedArray(1) < "1"
+Traceback (most recent call last):
+    ...
+TypeError: '<' not supported between instances of 'FixedArray' and 'str'
 ```
 
 **性能对比**
@@ -2018,26 +1893,16 @@ FixedArray.reshape(*shape)
 **示例**
 
 ```python
->> > six = FixedArray(["1.1", "2.2", "3.3", "4.4", "5.5", "6.6"])
->> > six.reshape(2, 3)
+>>> six = FixedArray(["1.1", "2.2", "3.3", "4.4", "5.5", "6.6"])
+>>> six.reshape(2, 3)
 FixedArray([[1.1, 2.2, 3.3],
             [4.4, 5.5, 6.6]], scale=1)
->> > six.reshape((3, -1)).shape
+>>> six.reshape((3, -1)).shape
 (3, 2)
->> > six.reshape(4, 2)
-Traceback(most
-recent
-call
-last):
-...
-ValueError: cannot
-reshape
-array
-of
-size
-6
-into
-shape(4, 2)
+>>> six.reshape(4, 2)
+Traceback (most recent call last):
+    ...
+ValueError: cannot reshape array of size 6 into shape (4,2)
 ```
 
 **另请参阅**
@@ -2071,10 +1936,10 @@ FixedArray.transpose(*axes)
 **示例**
 
 ```python
->> > cube = FixedArray(np.arange(6).reshape(1, 2, 3))
->> > cube.transpose(2, 0, 1).shape
+>>> cube = FixedArray(np.arange(6).reshape(1, 2, 3))
+>>> cube.transpose(2, 0, 1).shape
 (3, 1, 2)
->> > np.transpose(FixedArray([[1, 2], [3, 4]]))
+>>> np.transpose(FixedArray([[1, 2], [3, 4]]))
 FixedArray([[1, 3],
             [2, 4]], scale=0)
 ```
@@ -2113,48 +1978,33 @@ a[key]
 **示例**
 
 ```python
->> > g = FixedArray([["1.1", "2.2", "3.3"],
-                     ...["4.4", "5.5", "6.6"]])
->> > g[0]
+>>> g = FixedArray([["1.1", "2.2", "3.3"],
+...                   ["4.4", "5.5", "6.6"]])
+>>> g[0]
 FixedArray([1.1, 2.2, 3.3], scale=1)
->> > g[0, 1]
+>>> g[0, 1]
 FixedArray(2.2, scale=1)
->> > g[:, 0]
+>>> g[:, 0]
 FixedArray([1.1, 4.4], scale=1)
->> > g[..., -1]
+>>> g[..., -1]
 FixedArray([3.3, 6.6], scale=1)
->> > six[::2]
+>>> six[::2]
 FixedArray([1.1, 3.3, 5.5], scale=1)
->> > six[[0, 2]]
+>>> six[[0, 2]]
 FixedArray([1.1, 3.3], scale=1)
->> > six[six > 3]
+>>> six[six > 3]
 FixedArray([3.3, 4.4, 5.5, 6.6], scale=1)
->> > six[0] = 1
-Traceback(most
-recent
-call
-last):
-...
-TypeError: 'FixedArray'
-object
-does
-not support
-item
-assignment
->> > y = FixedArray(["1.5", "-2.0", "3.0"])
->> > y * (y > 0).astype(np.int64)  # 用掩码把负数清零
+>>> six[0] = 1
+Traceback (most recent call last):
+    ...
+TypeError: 'FixedArray' object does not support item assignment
+>>> y = FixedArray(["1.5", "-2.0", "3.0"])
+>>> y * (y > 0).astype(np.int64)  # 用掩码把负数清零
 FixedArray([1.5, 0.0, 3.0], scale=1)
->> > y * (y > 0)  # 布尔数组不能直接参与运算
-Traceback(most
-recent
-call
-last):
-...
-TypeError: operand
-'FixedArray'
-does
-not support
-ufuncs(__array_ufunc__=None)
+>>> y * (y > 0)  # 布尔数组不能直接参与运算
+Traceback (most recent call last):
+    ...
+TypeError: operand 'FixedArray' does not support ufuncs (__array_ufunc__=None)
 ```
 
 **另请参阅**
@@ -2190,48 +2040,26 @@ iter(a)
 **示例**
 
 ```python
->> > len(g)
+>>> len(g)
 2
->> > [row for row in g]
+>>> [row for row in g]
 [FixedArray([1.1, 2.2, 3.3], scale=1), FixedArray([4.4, 5.5, 6.6], scale=1)]
->> > list(FixedArray(["1.5", "2.5"]))
+>>> list(FixedArray(["1.5", "2.5"]))
 [FixedArray(1.5, scale=1), FixedArray(2.5, scale=1)]
->> > bool(FixedArray("0.01")), bool(FixedArray(0)), bool(FixedArray([0]))
+>>> bool(FixedArray("0.01")), bool(FixedArray(0)), bool(FixedArray([0]))
 (True, False, False)
->> > bool(FixedArray([1, 2]))
-Traceback(most
-recent
-call
-last):
-...
-ValueError: The
-truth
-value
-of
-an
-array
-with more than one element is ambiguous.Use a.any() or a.all()
->> > len(FixedArray("1.5"))
-Traceback(most
-recent
-call
-last):
-...
-TypeError: len()
-of
-unsized
-object
->> > list(FixedArray("1.5"))
-Traceback(most
-recent
-call
-last):
-...
-TypeError: iteration
-over
-a
-0 - d
-FixedArray
+>>> bool(FixedArray([1, 2]))
+Traceback (most recent call last):
+    ...
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+>>> len(FixedArray("1.5"))
+Traceback (most recent call last):
+    ...
+TypeError: len() of unsized object
+>>> list(FixedArray("1.5"))
+Traceback (most recent call last):
+    ...
+TypeError: iteration over a 0-d FixedArray
 ```
 
 **另请参阅**
@@ -2272,28 +2100,18 @@ float64 只有约 15–16 位十进制有效数字，导出 float 应该是计�
 **示例**
 
 ```python
->> > FixedArray("1.25").to_float()
+>>> FixedArray("1.25").to_float()
 1.25
->> > FixedArray(["1.50", "-2.25"]).to_float()
-array([1.5, -2.25])
->> > FixedArray(2 ** 53 + 1).to_float()  # 超出 float64 精度，低位丢失
+>>> FixedArray(["1.50", "-2.25"]).to_float()
+array([ 1.5 , -2.25])
+>>> FixedArray(2 ** 53 + 1).to_float()  # 超出 float64 精度，低位丢失
 9007199254740992.0
->> > FixedArray("1e-30").to_float()  # scale 30：10**30 不能精确表示为 float64，走整数路径
+>>> FixedArray("1e-30").to_float()  # scale 30：10**30 不能精确表示为 float64，走整数路径
 1e-30
->> > float(FixedArray("1.5"))
-Traceback(most
-recent
-call
-last):
-...
-TypeError: float()
-argument
-must
-be
-a
-string or a
-real
-number, not 'FixedArray'
+>>> float(FixedArray("1.5"))
+Traceback (most recent call last):
+    ...
+TypeError: float() argument must be a string or a real number, not 'FixedArray'
 ```
 
 **另请参阅**
@@ -2321,13 +2139,13 @@ FixedArray.to_decimal()
 **示例**
 
 ```python
->> > FixedArray("1.50").to_decimal()
+>>> FixedArray("1.50").to_decimal()
 Decimal('1.50')
->> > FixedArray([["1.5", "2"], ["3", "4"]]).to_decimal()
+>>> FixedArray([["1.5", "2"], ["3", "4"]]).to_decimal()
 array([[Decimal('1.5'), Decimal('2.0')],
        [Decimal('3.0'), Decimal('4.0')]], dtype=object)
->> > orig = FixedArray(["0.10", "123.45"])
->> > bool((FixedArray(orig.to_decimal()) == orig).all())
+>>> orig = FixedArray(["0.10", "123.45"])
+>>> bool((FixedArray(orig.to_decimal()) == orig).all())
 True
 ```
 
@@ -2367,20 +2185,20 @@ FixedArray.to_pandas(index=None, name=None, as_float=True)
 **示例**
 
 ```python
->> > px = FixedArray(["1.50", "2.25"])
->> > px.to_pandas(index=["a", "b"], name="px")
+>>> px = FixedArray(["1.50", "2.25"])
+>>> px.to_pandas(index=["a", "b"], name="px")
 a
 1.50
 b
 2.25
 Name: px, dtype: float64
->> > px.to_pandas(as_float=False)
+>>> px.to_pandas(as_float=False)
 0
 1.50
 1
 2.25
 dtype: object
->> > FixedArray([["1.5", "2"], ["3", "4"]]).to_pandas()
+>>> FixedArray([["1.5", "2"], ["3", "4"]]).to_pandas()
 0
 1
 0
@@ -2429,21 +2247,13 @@ FixedArray.to_polars(name="value", as_float=True)
 > 以下示例依赖 polars，未纳入自动校验。
 
 ```python
->> > s = FixedArray(["1.50", "2.25"]).to_polars(name="px")  # doctest: +SKIP
->> > s.to_list()  # doctest: +SKIP
+>>> s = FixedArray(["1.50", "2.25"]).to_polars(name="px")  # doctest: +SKIP
+>>> s.to_list()  # doctest: +SKIP
 [1.5, 2.25]
->> > FixedArray([[1, 2], [3, 4]]).to_polars()  # doctest: +SKIP
-Traceback(most
-recent
-call
-last):
-...
-ValueError: to_polars
-仅支持
-1
-维或标量
-FixedArray，当前维度为
-2
+>>> FixedArray([[1, 2], [3, 4]]).to_polars()  # doctest: +SKIP
+Traceback (most recent call last):
+    ...
+ValueError: to_polars 仅支持 1 维或标量 FixedArray，当前维度为 2
 ```
 
 **另请参阅**
@@ -2474,29 +2284,21 @@ repr(a)
 **示例**
 
 ```python
->> > neg = FixedArray("-0.05")
->> > str(neg)
+>>> neg = FixedArray("-0.05")
+>>> str(neg)
 '-0.05'
->> > neg
+>>> neg
 FixedArray(-0.05, scale=2)
->> > print(FixedArray(["1.5", "-2"]))
+>>> print(FixedArray(["1.5", "-2"]))
 [1.5, -2.0]
->> > print(FixedArray(np.arange(2000)))
+>>> print(FixedArray(np.arange(2000)))
 [0, 1, 2, ..., 1997, 1998, 1999]
->> > f"总额：{FixedArray('1.50')}"
+>>> f"总额：{FixedArray('1.50')}"
 '总额：1.50'
->> > f"{FixedArray('1.50'):.1f}"
-Traceback(most
-recent
-call
-last):
-...
-TypeError: unsupported
-format
-string
-passed
-to
-FixedArray.__format__
+>>> f"{FixedArray('1.50'):.1f}"
+Traceback (most recent call last):
+    ...
+TypeError: unsupported format string passed to FixedArray.__format__
 ```
 
 **另请参阅**
@@ -2553,32 +2355,18 @@ FixedArray.__format__
 被拒绝的隐式转换，以及 `ndarray` 在左侧的运算：
 
 ```python
->> > h = FixedArray(["1.50", "2.25"])
->> > np.sqrt(h)
-Traceback(most
-recent
-call
-last):
-...
-TypeError: operand
-'FixedArray'
-does
-not support
-ufuncs(__array_ufunc__=None)
->> > np.asarray(h)
-Traceback(most
-recent
-call
-last):
-...
-TypeError: FixedArray
-不能隐式转成数组：要
-float
-请用
-to_float()，要整数尾数请用.mantissa
->> > np.array([1, 2]) * h
+>>> h = FixedArray(["1.50", "2.25"])
+>>> np.sqrt(h)
+Traceback (most recent call last):
+    ...
+TypeError: operand 'FixedArray' does not support ufuncs (__array_ufunc__=None)
+>>> np.asarray(h)
+Traceback (most recent call last):
+    ...
+TypeError: FixedArray 不能隐式转成数组：要 float 请用 to_float()，要整数尾数请用 .mantissa
+>>> np.array([1, 2]) * h
 FixedArray([1.50, 4.50], scale=2)
->> > np.shape(m), np.ndim(m), np.size(m)
+>>> np.shape(m), np.ndim(m), np.size(m)
 ((2, 2), 2, 4)
 ```
 
@@ -2586,30 +2374,24 @@ FixedArray([1.50, 4.50], scale=2)
 ，可借助精确乘法实现（乘以 `10^(-scale)` 不会发生舍入）：
 
 ```python
->> >
-
-def from_mantissa(mant, scale):
-
-
-    ...
-"""由 int64 尾数与 scale 构造 FixedArray（精确）。"""
-...
-return FixedArray(mant) * FixedArray(f"1e-{scale}")
->> > from_mantissa(np.array([150, 225]), 2)
+>>> def from_mantissa(mant, scale):
+...     """由 int64 尾数与 scale 构造 FixedArray（精确）。"""
+...     return FixedArray(mant) * FixedArray(f"1e-{scale}")
+>>> from_mantissa(np.array([150, 225]), 2)
 FixedArray([1.50, 2.25], scale=2)
->> > p = FixedArray(["10.05", "9.80", "10.20"])
->> > p[np.argsort(p.mantissa)]  # 排序
+>>> p = FixedArray(["10.05", "9.80", "10.20"])
+>>> p[np.argsort(p.mantissa)]  # 排序
 FixedArray([9.80, 10.05, 10.20], scale=2)
->> > from_mantissa(m.mantissa.max(axis=0), m.scale)  # 按轴取最大值
+>>> from_mantissa(m.mantissa.max(axis=0), m.scale)  # 按轴取最大值
 FixedArray([3.30, 4.40], scale=2)
->> > u, v = FixedArray(["1.5", "2.5"]), FixedArray(["0.25"])
->> > s = max(u.scale, v.scale)
->> > from_mantissa(np.concatenate([u.rescale(s).mantissa, v.rescale(s).mantissa]), s)  # 拼接
+>>> u, v = FixedArray(["1.5", "2.5"]), FixedArray(["0.25"])
+>>> s = max(u.scale, v.scale)
+>>> from_mantissa(np.concatenate([u.rescale(s).mantissa, v.rescale(s).mantissa]), s)  # 拼接
 FixedArray([1.50, 2.50, 0.25], scale=2)
->> > from_mantissa(np.where([True, False], u.rescale(s).mantissa, v.rescale(s).mantissa), s)  # 条件选择
+>>> from_mantissa(np.where([True, False], u.rescale(s).mantissa, v.rescale(s).mantissa), s)  # 条件选择
 FixedArray([1.50, 0.25], scale=2)
->> > cash = FixedArray(["100.00", "-30.50", "12.25"])
->> > from_mantissa(np.cumsum(cash.mantissa), cash.scale)  # 累计和：int64 溢出会静默回绕，仅在确定不越界时使用
+>>> cash = FixedArray(["100.00", "-30.50", "12.25"])
+>>> from_mantissa(np.cumsum(cash.mantissa), cash.scale)  # 累计和：int64 溢出会静默回绕，仅在确定不越界时使用
 FixedArray([100.00, 69.50, 81.75], scale=2)
 ```
 
@@ -2654,11 +2436,11 @@ FixedArray._set(mantissa, scale)
 **示例**
 
 ```python
->> > obj = FixedArray.__new__(FixedArray)
->> > obj._set(np.array([150, 225], dtype=np.int64), 2)
->> > obj
+>>> obj = FixedArray.__new__(FixedArray)
+>>> obj._set(np.array([150, 225], dtype=np.int64), 2)
+>>> obj
 FixedArray([1.50, 2.25], scale=2)
->> > obj.mantissa.flags.writeable
+>>> obj.mantissa.flags.writeable
 False
 ```
 
@@ -2698,9 +2480,9 @@ FixedArray._from_mantissa(mantissa, scale)
 **示例**
 
 ```python
->> > FixedArray._from_mantissa(np.array([1234, -500], dtype=np.int64), scale=2)
+>>> FixedArray._from_mantissa(np.array([1234, -500], dtype=np.int64), scale=2)
 FixedArray([12.34, -5.00], scale=2)
->> > FixedArray._from_mantissa(42, scale=0)
+>>> FixedArray._from_mantissa(42, scale=0)
 FixedArray(42, scale=0)
 ```
 
@@ -2735,9 +2517,9 @@ FixedArray._is_numeric_operand(val)
 **示例**
 
 ```python
->> > FixedArray._is_numeric_operand(10), FixedArray._is_numeric_operand([1.5, Decimal("2.0")])
+>>> FixedArray._is_numeric_operand(10), FixedArray._is_numeric_operand([1.5, Decimal("2.0")])
 (True, True)
->> > FixedArray._is_numeric_operand(True), FixedArray._is_numeric_operand("1.5")
+>>> FixedArray._is_numeric_operand(True), FixedArray._is_numeric_operand("1.5")
 (False, False)
 ```
 
@@ -2778,19 +2560,14 @@ FixedArray._coerce(other, strict=True)
 **示例**
 
 ```python
->> > FixedArray._coerce(1.25)
+>>> FixedArray._coerce(1.25)
 FixedArray(1.25, scale=2)
->> > FixedArray._coerce("1.25", strict=False) is None
+>>> FixedArray._coerce("1.25", strict=False) is None
 True
->> > FixedArray._coerce("1.25", strict=True)
-Traceback(most
-recent
-call
-last):
-...
-TypeError: FixedArray
-只能与数值类型运算、比较或对齐，收到
-str
+>>> FixedArray._coerce("1.25", strict=True)
+Traceback (most recent call last):
+    ...
+TypeError: FixedArray 只能与数值类型运算、比较或对齐，收到 str
 ```
 
 **另请参阅**
@@ -2825,25 +2602,16 @@ FixedArray._check_scale(scale)
 **示例**
 
 ```python
->> > FixedArray._check_scale(4)
+>>> FixedArray._check_scale(4)
 4
->> > FixedArray._check_scale(-1)
-Traceback(most
-recent
-call
-last):
-...
-ValueError: scale
-必须是非负整数，收到 - 1
->> > FixedArray._check_scale(True)
-Traceback(most
-recent
-call
-last):
-...
-ValueError: scale
-必须是非负整数，收到
-True
+>>> FixedArray._check_scale(-1)
+Traceback (most recent call last):
+    ...
+ValueError: scale 必须是非负整数，收到 -1
+>>> FixedArray._check_scale(True)
+Traceback (most recent call last):
+    ...
+ValueError: scale 必须是非负整数，收到 True
 ```
 
 **另请参阅**
@@ -2881,18 +2649,12 @@ FixedArray._as_int64(x)
 **示例**
 
 ```python
->> > FixedArray._as_int64(100)
+>>> FixedArray._as_int64(100)
 array(100)
->> > FixedArray._as_int64(2 ** 63)
-Traceback(most
-recent
-call
-last):
-...
-OverflowError: 9223372036854775808
-超出
-int64
-范围
+>>> FixedArray._as_int64(2 ** 63)
+Traceback (most recent call last):
+    ...
+OverflowError: 9223372036854775808 超出 int64 范围
 ```
 
 **另请参阅**
@@ -2927,8 +2689,8 @@ FixedArray._align_scales(a, b)
 **示例**
 
 ```python
->> > a_al, b_al = FixedArray._align_scales(FixedArray("1.5"), FixedArray("0.25"))
->> > a_al, b_al
+>>> a_al, b_al = FixedArray._align_scales(FixedArray("1.5"), FixedArray("0.25"))
+>>> a_al, b_al
 (FixedArray(1.50, scale=2), FixedArray(0.25, scale=2))
 ```
 
@@ -2973,11 +2735,11 @@ FixedArray._parse_decimal_str(s)
 **示例**
 
 ```python
->> > FixedArray._parse_decimal_str("19.99")
+>>> FixedArray._parse_decimal_str("19.99")
 (1999, 2)
->> > FixedArray._parse_decimal_str("1.5e-3")
+>>> FixedArray._parse_decimal_str("1.5e-3")
 (15, 4)
->> > FixedArray._parse_decimal_str("-9223372036854775808")
+>>> FixedArray._parse_decimal_str("-9223372036854775808")
 (-9223372036854775808, 0)
 ```
 
@@ -3015,17 +2777,13 @@ FixedArray._parse_fraction(f)
 **示例**
 
 ```python
->> > from fractions import Fraction
->> > FixedArray._parse_fraction(Fraction(3, 8))
+>>> from fractions import Fraction
+>>> FixedArray._parse_fraction(Fraction(3, 8))
 (375, 3)
->> > FixedArray._parse_fraction(Fraction(1, 3))
-Traceback(most
-recent
-call
-last):
-...
-ValueError: 1 / 3
-不是有限小数
+>>> FixedArray._parse_fraction(Fraction(1, 3))
+Traceback (most recent call last):
+    ...
+ValueError: 1/3 不是有限小数
 ```
 
 **另请参阅**
@@ -3061,9 +2819,9 @@ FixedArray._parse_float_scalar(val)
 **示例**
 
 ```python
->> > FixedArray._parse_float_scalar(0.1)
+>>> FixedArray._parse_float_scalar(0.1)
 (1, 1)
->> > FixedArray._parse_float_scalar(1.0)
+>>> FixedArray._parse_float_scalar(1.0)
 (1, 0)
 ```
 
@@ -3072,17 +2830,56 @@ FixedArray._parse_float_scalar(val)
 - [`FixedArray._parse_float_array`](#fixedarray_parse_float_array)
 - [`FixedArray._parse_decimal_str`](#fixedarray_parse_decimal_str)
 
+### FixedArray._expand_nested
+
+```python
+@classmethod
+FixedArray._expand_nested(values)
+```
+
+递归遍历嵌套的 `list` 或 `tuple`，将其中的 `FixedArray` 元素转换为等值的 `Decimal`（0 维标量）或 `Decimal`
+对象数组（多维数组），完整保留原有的十进制小数位数。
+
+**参数**
+
+- **values** : *Any* — 待展开的嵌套序列或元素。
+
+**返回值**
+
+- **out** : *Any* — 将所有 `FixedArray` 替换为 `values.to_decimal()` 后的列表或原元素。
+
+**机制说明**
+
+由于 `FixedArray.__array__` 显式禁止隐式转 `ndarray`，当用户向构造器传入包含 `FixedArray` 元素的列表或元组（如
+`[FixedArray("1.50"), 2]` 或 `[FixedArray([1, 2]), FixedArray(["3.5", "4"])]`）时，`np.asarray(values)` 会触发 `TypeError`
+。构造器捕获该异常后，若 `isinstance(values, (list, tuple))`，便调用 `cls._expand_nested(values)` 将内部的 `FixedArray`
+展开为无损的 `Decimal` 表示，再交给 `np.asarray(...)` 与 [`_parse_text_array`](#fixedarray_parse_text_array) 统一对齐
+`scale`。
+
+**示例**
+
+```python
+>>> FixedArray._expand_nested([FixedArray("1.50"), (2, FixedArray(["0.1", "0.25"]))])
+[Decimal('1.50'), [2, array([Decimal('0.10'), Decimal('0.25')], dtype=object)]]
+```
+
+**另请参阅**
+
+- [`FixedArray(values, scale=None)`](#fixedarrayvalues-scalenone)
+- [`FixedArray.to_decimal`](#fixedarrayto_decimal)
+- [`FixedArray._parse_object_element`](#fixedarray_parse_object_element)
+
 ### FixedArray._parse_object_element
 
 ```python
 FixedArray._parse_object_element(val)
 ```
 
-将单个任意受支持的标量（`int`、`float`、`Fraction`、`str`、`Decimal`）分派解析为 `(mantissa, scale)`。
+将单个受支持的标量（`int`、`float`、`Fraction`、`str`、`Decimal` 或 0 维 `FixedArray`）分派解析为 `(mantissa, scale)`。
 
 **参数**
 
-- **val** : *int, float, Fraction, Decimal 或 str* — 单个标量元素。
+- **val** : *int, float, Fraction, Decimal, str 或 0 维 FixedArray* — 单个标量元素。
 
 **返回值**
 
@@ -3091,25 +2888,31 @@ FixedArray._parse_object_element(val)
 **异常**
 
 - **TypeError** — `val` 为布尔类型。
-- **ValueError** / **OverflowError** — 元素内容非法或越界。
+- **ValueError** — `val` 是非 0 维的多维 `FixedArray`（报 `"对象数组的元素必须是标量，收到形状为 ... 的 FixedArray"`
+  ），或元素内容无法解析。
+- **OverflowError** — 元素数值超出 `int64` 范围。
 
 **机制说明**
 
-按类型依次分派：布尔值报 `TypeError`；整数直接返回 `(int(val), 0)`；浮点数转 [
-`_parse_float_scalar`](#fixedarray_parse_float_scalar)；`Fraction` 转 [`_parse_fraction`](#fixedarray_parse_fraction)；其余（
-`str`、`Decimal`）转 `str(val)` 后交给 [`_parse_decimal_str`](#fixedarray_parse_decimal_str)。
+按类型依次分派：布尔值报 `TypeError`；`FixedArray` 若 `val.ndim == 0` 直接返回 `(int(val.mantissa), val.scale)`，否则报
+`ValueError`；整数直接返回 `(int(val), 0)`；浮点数转 [`_parse_float_scalar`](#fixedarray_parse_float_scalar)；`Fraction`
+转 [`_parse_fraction`](#fixedarray_parse_fraction)；其余（`str`、`Decimal`）转 `str(val)` 后交给 [
+`_parse_decimal_str`](#fixedarray_parse_decimal_str)。
 
 **示例**
 
 ```python
->> > FixedArray._parse_object_element(Decimal("1.250"))
+>>> FixedArray._parse_object_element(Decimal("1.250"))
 (1250, 3)
->> > FixedArray._parse_object_element(42)
+>>> FixedArray._parse_object_element(FixedArray("1.50"))
+(150, 2)
+>>> FixedArray._parse_object_element(42)
 (42, 0)
 ```
 
 **另请参阅**
 
+- [`FixedArray._expand_nested`](#fixedarray_expand_nested)
 - [`FixedArray._parse_text_array`](#fixedarray_parse_text_array)
 
 ### FixedArray._parse_float_array
@@ -3149,9 +2952,9 @@ FixedArray._parse_float_array(arr, target_scale=None)
 **示例**
 
 ```python
->> > FixedArray._parse_float_array(np.array([0.1, 0.25]))
+>>> FixedArray._parse_float_array(np.array([0.1, 0.25]))
 (array([10, 25]), 2)
->> > FixedArray._parse_float_array(np.array([100000.0, 1 / 3]), target_scale=2)
+>>> FixedArray._parse_float_array(np.array([100000.0, 1 / 3]), target_scale=2)
 (array([10000000, 33]), 2)
 ```
 
@@ -3191,9 +2994,9 @@ FixedArray._align_mantissas(mantissas, scales, target)
 **示例**
 
 ```python
->> > m_in = np.array([1, 25], dtype=np.int64)
->> > s_in = np.array([1, 2], dtype=np.int64)
->> > FixedArray._align_mantissas(m_in, s_in, target=3)
+>>> m_in = np.array([1, 25], dtype=np.int64)
+>>> s_in = np.array([1, 2], dtype=np.int64)
+>>> FixedArray._align_mantissas(m_in, s_in, target=3)
 array([100, 250])
 ```
 
@@ -3236,7 +3039,7 @@ FixedArray._round_float_to_scale(values, scale)
 **示例**
 
 ```python
->> > FixedArray._round_float_to_scale(np.array([2.675, 0.123456]), scale=2)
+>>> FixedArray._round_float_to_scale(np.array([2.675, 0.123456]), scale=2)
 array([268, 12])
 ```
 
@@ -3277,7 +3080,7 @@ FixedArray._parse_text_array(arr)
 **示例**
 
 ```python
->> > FixedArray._parse_text_array(np.array(["1.5", "2.25", "1.5"]))
+>>> FixedArray._parse_text_array(np.array(["1.5", "2.25", "1.5"]))
 (array([150, 225, 150]), 2)
 ```
 
@@ -3317,9 +3120,9 @@ FixedArray._check_rounding(mode)
 **示例**
 
 ```python
->> > FixedArray._check_rounding(RoundingMode.HALF_EVEN)
+>>> FixedArray._check_rounding(RoundingMode.HALF_EVEN)
 'half_even'
->> > FixedArray._check_rounding("floor")
+>>> FixedArray._check_rounding("floor")
 'floor'
 ```
 
@@ -3357,17 +3160,10 @@ FixedArray._check_division(m, d)
 **示例**
 
 ```python
->> > FixedArray._check_division(np.array([-2 ** 63], dtype=np.int64), np.array([-1], dtype=np.int64))
-Traceback(most
-recent
-call
-last):
-...
-OverflowError: -2 ** 63
-除以 - 1
-超出
-int64
-范围
+>>> FixedArray._check_division(np.array([-2 ** 63], dtype=np.int64), np.array([-1], dtype=np.int64))
+Traceback (most recent call last):
+    ...
+OverflowError: -2**63 除以 -1 超出 int64 范围
 ```
 
 **另请参阅**
@@ -3400,9 +3196,9 @@ FixedArray._max_abs(x)
 **示例**
 
 ```python
->> > FixedArray._max_abs(np.array([-2 ** 63, 100], dtype=np.int64)) == 2 ** 63
+>>> FixedArray._max_abs(np.array([-2 ** 63, 100], dtype=np.int64)) == 2 ** 63
 True
->> > FixedArray._max_abs(np.array([], dtype=np.int64))
+>>> FixedArray._max_abs(np.array([], dtype=np.int64))
 0
 ```
 
@@ -3442,9 +3238,9 @@ FixedArray._mul_pow10(x, k)
 **示例**
 
 ```python
->> > FixedArray._mul_pow10(np.array([12, -5], dtype=np.int64), 2)
+>>> FixedArray._mul_pow10(np.array([12, -5], dtype=np.int64), 2)
 array([1200, -500])
->> > FixedArray._mul_pow10(np.array([0, 0], dtype=np.int64), 30)
+>>> FixedArray._mul_pow10(np.array([0, 0], dtype=np.int64), 30)
 array([0, 0])
 ```
 
@@ -3492,12 +3288,10 @@ FixedArray._decide_bump(mode, *, is_negative, odd_q, has_fraction, over_half, ex
 **示例**
 
 ```python
->> >  # 2.5 = 2 + 0.5 (floor_base=True)：half_up 进位 (+1 -> 3)，half_even 不进位 (2 为偶数 -> 2)
->> > bool(FixedArray._decide_bump("half_up", is_negative=False, odd_q=False, has_fraction=True, over_half=False,
-                                  exact_half=True, floor_base=True))
+>>>  # 2.5 = 2 + 0.5 (floor_base=True)：half_up 进位 (+1 -> 3)，half_even 不进位 (2 为偶数 -> 2)
+>>> bool(FixedArray._decide_bump("half_up", is_negative=False, odd_q=False, has_fraction=True, over_half=False, exact_half=True, floor_base=True))
 True
->> > bool(FixedArray._decide_bump("half_even", is_negative=False, odd_q=False, has_fraction=True, over_half=False,
-                                  exact_half=True, floor_base=True))
+>>> bool(FixedArray._decide_bump("half_even", is_negative=False, odd_q=False, has_fraction=True, over_half=False, exact_half=True, floor_base=True))
 False
 ```
 
@@ -3533,11 +3327,11 @@ FixedArray._round_quotient(q, r, d, mode)
 **示例**
 
 ```python
->> > q, r = np.divmod(np.array([7, -7]), np.array([2, 2]))  # 3.5 与 -3.5 (= -4 + 0.5)
->> > FixedArray._round_quotient(q, r, np.array([2, 2]), "half_up")
-array([4, -4])
->> > FixedArray._round_quotient(q, r, np.array([2, 2]), "half_even")
-array([4, -4])
+>>> q, r = np.divmod(np.array([7, -7]), np.array([2, 2]))  # 3.5 与 -3.5 (= -4 + 0.5)
+>>> FixedArray._round_quotient(q, r, np.array([2, 2]), "half_up")
+array([ 4, -4])
+>>> FixedArray._round_quotient(q, r, np.array([2, 2]), "half_even")
+array([ 4, -4])
 ```
 
 **另请参阅**
@@ -3576,12 +3370,12 @@ FixedArray._divmod_round(m, d, mode="half_up")
 **示例**
 
 ```python
->> > FixedArray._divmod_round(5, 2, mode="half_up")
+>>> FixedArray._divmod_round(5, 2, mode="half_up")
 3
->> > FixedArray._divmod_round(5, 2, mode="half_even")
+>>> FixedArray._divmod_round(5, 2, mode="half_even")
 2
->> > FixedArray._divmod_round(np.array([10, -10]), 3, mode="down")
-array([3, -3])
+>>> FixedArray._divmod_round(np.array([10, -10]), 3, mode="down")
+array([ 3, -3])
 ```
 
 **另请参阅**
@@ -3618,9 +3412,9 @@ FixedArray._doubling_step_10r(r, d)
 **示例**
 
 ```python
->> > d = np.array([2 ** 62], dtype=np.int64)
->> > r = np.array([2 ** 61], dtype=np.int64)  # r / d = 0.5，乘以 10 后商为 5、余数为 0
->> > FixedArray._doubling_step_10r(r, d)
+>>> d = np.array([2 ** 62], dtype=np.int64)
+>>> r = np.array([2 ** 61], dtype=np.int64)  # r / d = 0.5，乘以 10 后商为 5、余数为 0
+>>> FixedArray._doubling_step_10r(r, d)
 (array([5]), array([0]))
 ```
 
@@ -3666,8 +3460,8 @@ FixedArray._chunked_divmod_round(m, d, k, mode)
 **示例**
 
 ```python
->> >  # 100 / 3 保留 4 位小数 (k=4)：333333... -> 3333
->> > FixedArray._chunked_divmod_round(np.array([1], dtype=np.int64), np.array([3], dtype=np.int64), k=4, mode="half_up")
+>>>  # 100 / 3 保留 4 位小数 (k=4)：333333... -> 3333
+>>> FixedArray._chunked_divmod_round(np.array([1], dtype=np.int64), np.array([3], dtype=np.int64), k=4, mode="half_up")
 array([3333])
 ```
 
@@ -3717,18 +3511,18 @@ FixedArray._round_div_pow10(q, r, d, k, mode)
 **示例**
 
 ```python
->> >  # 纯整数缩小精度：(125 + 0/1) / 10^1 = 12.5 -> half_up 得 13，half_even 得 12
->> > int(FixedArray._round_div_pow10(125, 0, 1, k=1, mode="half_up"))
+>>>  # 纯整数缩小精度：(125 + 0/1) / 10^1 = 12.5 -> half_up 得 13，half_even 得 12
+>>> int(FixedArray._round_div_pow10(125, 0, 1, k=1, mode="half_up"))
 13
->> > int(FixedArray._round_div_pow10(125, 0, 1, k=1, mode="half_even"))
+>>> int(FixedArray._round_div_pow10(125, 0, 1, k=1, mode="half_even"))
 12
->> >  # 带余数缩小精度：(12 + 1/2) / 10^1 = 1.25 -> 1
->> > int(FixedArray._round_div_pow10(12, 1, 2, k=1, mode="half_up"))
+>>>  # 带余数缩小精度：(12 + 1/2) / 10^1 = 1.25 -> 1
+>>> int(FixedArray._round_div_pow10(12, 1, 2, k=1, mode="half_up"))
 1
->> >  # k=19 超大跨度缩小：5*10^18 / 10^19 = 0.5 -> half_up 得 1，half_even 得 0
->> > int(FixedArray._round_div_pow10(5_000_000_000_000_000_000, 0, 1, k=19, mode="half_up"))
+>>>  # k=19 超大跨度缩小：5*10^18 / 10^19 = 0.5 -> half_up 得 1，half_even 得 0
+>>> int(FixedArray._round_div_pow10(5_000_000_000_000_000_000, 0, 1, k=19, mode="half_up"))
 1
->> > int(FixedArray._round_div_pow10(5_000_000_000_000_000_000, 0, 1, k=19, mode="half_even"))
+>>> int(FixedArray._round_div_pow10(5_000_000_000_000_000_000, 0, 1, k=19, mode="half_even"))
 0
 ```
 
@@ -3779,8 +3573,8 @@ FixedArray._chunked_mul_round(a, b, shift, mode="half_up")
 **示例**
 
 ```python
->> >  # 10^12 * 10^10 = 10^22（中间乘积远超 int64），除以 10^12 后为 10^10
->> > FixedArray._chunked_mul_round(10 ** 12, 10 ** 10, shift=12, mode="half_up")
+>>>  # 10^12 * 10^10 = 10^22（中间乘积远超 int64），除以 10^12 后为 10^10
+>>> FixedArray._chunked_mul_round(10 ** 12, 10 ** 10, shift=12, mode="half_up")
 array(10000000000)
 ```
 
@@ -3823,8 +3617,8 @@ FixedArray._chunked_sum(arr, axis=None, keepdims=False)
 **示例**
 
 ```python
->> > big_arr = np.array([2 ** 62, 2 ** 62, -2 ** 62], dtype=np.int64)
->> > FixedArray._chunked_sum(big_arr)
+>>> big_arr = np.array([2 ** 62, 2 ** 62, -2 ** 62], dtype=np.int64)
+>>> FixedArray._chunked_sum(big_arr)
 array(4611686018427387904)
 ```
 
@@ -3864,10 +3658,10 @@ FixedArray._chunked_matmul(a, b)
 **示例**
 
 ```python
->> > x = 3_037_000_499
->> > a_mat = np.array([[x, x]], dtype=np.int64)
->> > b_mat = np.array([[x], [-x]], dtype=np.int64)
->> > FixedArray._chunked_matmul(a_mat, b_mat)
+>>> x = 3_037_000_499
+>>> a_mat = np.array([[x, x]], dtype=np.int64)
+>>> b_mat = np.array([[x], [-x]], dtype=np.int64)
+>>> FixedArray._chunked_matmul(a_mat, b_mat)
 array([[0]])
 ```
 
@@ -3909,9 +3703,9 @@ FixedArray._compare(other, op)
 **示例**
 
 ```python
->> > bool(FixedArray("1.5")._compare(FixedArray("1.50"), np.equal))
+>>> bool(FixedArray("1.5")._compare(FixedArray("1.50"), np.equal))
 True
->> > FixedArray("1.5")._compare("1.5", np.equal) is NotImplemented
+>>> FixedArray("1.5")._compare("1.5", np.equal) is NotImplemented
 True
 ```
 
@@ -3946,9 +3740,9 @@ FixedArray._format_scalar(m, scale)
 **示例**
 
 ```python
->> > FixedArray._format_scalar(-5, scale=2)
+>>> FixedArray._format_scalar(-5, scale=2)
 '-0.05'
->> > FixedArray._format_scalar(123450, scale=3)
+>>> FixedArray._format_scalar(123450, scale=3)
 '123.450'
 ```
 

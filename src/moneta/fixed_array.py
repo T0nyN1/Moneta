@@ -62,7 +62,13 @@ class FixedArray:
         if scale is not None:
             scale = self._check_scale(scale)
 
-        arr = np.asarray(values)
+        try:
+            arr = np.asarray(values)
+        except TypeError:
+            if not isinstance(values, (list, tuple)):
+                raise
+            # 序列中含 FixedArray 元素：NumPy 会调用元素的 __array__ 而报错，先换成等值的 Decimal
+            arr = np.asarray(self._expand_nested(values))
         kind = arr.dtype.kind
 
         if kind in "iu":
@@ -283,10 +289,23 @@ class FixedArray:
         return cls._parse_decimal_str(np.format_float_positional(val, unique=True, trim="-"))
 
     @classmethod
+    def _expand_nested(cls, values: Any) -> Any:
+        """把 list / tuple（可嵌套）中的 FixedArray 换成等值的 Decimal（数组则为 Decimal 对象数组），保留小数位数。"""
+        if isinstance(values, FixedArray):
+            return values.to_decimal()
+        if isinstance(values, (list, tuple)):
+            return [cls._expand_nested(v) for v in values]
+        return values
+
+    @classmethod
     def _parse_object_element(cls, val: Any) -> Tuple[int, int]:
-        """将单个标量（int、float、Fraction、str、Decimal 等）解析为 (mantissa, scale)。"""
+        """将单个标量（int、float、Fraction、str、Decimal、0 维 FixedArray 等）解析为 (mantissa, scale)。"""
         if isinstance(val, (bool, np.bool_)):
             raise TypeError("FixedArray 不支持布尔类型")
+        if isinstance(val, FixedArray):
+            if val.ndim:
+                raise ValueError(f"对象数组的元素必须是标量，收到形状为 {val.shape} 的 FixedArray")
+            return int(val.mantissa), val.scale
         if isinstance(val, (int, np.integer)):
             return int(val), 0
         if isinstance(val, (float, np.floating)):

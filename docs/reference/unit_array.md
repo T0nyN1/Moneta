@@ -1,6 +1,7 @@
 # UnitArray — 带量纲定点数张量抽象基类
 
-`moneta.UnitArray` 是所有携带单位或金融量纲标签的定点数张量（如 `Money`、`Price`、`Quantity`）的统一抽象基类（`ABC`）。
+`moneta.UnitArray` 是所有携带单位或金融量纲标签的定点数张量（如 [`Money`](money.md)、[`Price`](price.md)、[
+`Quantity`](quantity.md)）的统一抽象基类（`ABC`）。
 它在底层封装一个只读的 [`FixedArray`](fixed_array.md) 实例承载数值，并在外部通过两个抽象钩子（[
 `_create_like`](#unitarray_create_like) 与 [`_check_compatible`](#unitarray_check_compatible)）绑定业务量纲：
 凡是不改变单位的运算（取正负、绝对值、沿轴求和、索引切片、首维迭代、形状变换）均由基类统一实现并自动保留原单位；
@@ -38,7 +39,8 @@ CNY
 ### 组合委托与双钩子扩展契约
 
 `UnitArray` 采用 **组合优于继承**的轻量级委托架构，自身仅声明单槽位 `__slots__ = ("_data",)` 指向底层的 [
-`FixedArray`](fixed_array.md)。任何具体子类（内置的 `Money`、`Price`、`Quantity` 或用户自定义量纲类）只需：
+`FixedArray`](fixed_array.md)。任何具体子类（内置的 [`Money`](money.md)、[`Price`](price.md)、[`Quantity`](quantity.md)
+或用户自定义量纲类）只需：
 
 1. 在 `__init__` 中初始化 `self._data`（类型为 `FixedArray`）与子类自身的量纲槽位；
 2. 实现 [`_create_like(new_data)`](#unitarray_create_like)：将新的 `FixedArray` 包装为携带当前实例相同单位/配置的新子类对象；
@@ -63,7 +65,7 @@ CNY
 `== !=`）** 对“量纲不匹配”和“无量纲数”采取了不同的安检策略：
 
 - **大小比较（`<`、`<=`、`>`、`>=`）—— 只要量纲不匹配或对方是无量纲数，一律报 `TypeError`**：
-    1. **对方是量纲不匹配的 `UnitArray`**（如 `USD` 与 `CNY` 比大小，或 `Money` 与 `Quantity` 比大小）：[
+    1. **对方是量纲不匹配的 `UnitArray`**（如 `USD` 与 `CNY` 比大小，或 `Money` 与 [`Quantity`](quantity.md) 比大小）：[
        `_ordered`](#unitarray_ordered) 直接调用 `self._check_compatible(other)`，由子类立即抛出携带具体冲突原因的
        `TypeError`（如 `TypeError: 币种不匹配: USD 与 CNY` 或 `TypeError: 操作数必须是 Money，得到 Quantity`）。
     2. **对方是无量纲数或非 `UnitArray` 对象**（如 `int`、`float`、`Decimal`、`FixedArray`、`ndarray`）：`_ordered` 先通过
@@ -78,16 +80,17 @@ CNY
       **带单位对象与裸数字 `0` 永远不相等（`a == 0` 恒为 `False`）**，判断是否为零必须使用 [
       `a.is_zero()`](#unitarrayis_zero)。
 
-| 比较场景                                                                             | `a == b` / `a != b`                                                                                          | `a < b` / `a <= b` / `a > b` / `a >= b`                                                    | 设计原因                                                                                                                  |
-|--------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------|
-| **同子类且单位兼容**（如 `Money("1", "USD")` 与 `Money("2", "USD")`）                | 委托 `self._data == other._data`，0 维返回 `np.bool_`，高维返回 `bool` 数组（形状无法广播时抛 `ValueError`） | 委托 `self._data < other._data`，0 维返回 `np.bool_`，高维返回 `bool` 数组                 | 同量纲数值可直接按定点数对齐 `scale` 后逐元素比较                                                                         |
-| **同为 `UnitArray` 但单位不兼容**（如 `USD` 与 `CNY`，或 `Money` 与 `Quantity`）     | 内部返回 `NotImplemented`，Python 最终判定为 `False` / `True`（**不抛异常**）                                | 调用 `self._check_compatible(other)`，**立即抛出子类的 `TypeError`**（含具体单位冲突原因） | 字典查找、`in` 成员检测要求 `==` 永不因类型/单位不同而崩溃；但“100 美元是否小于 200 人民币”属于逻辑错误，必须显式报错     |
-| **与无量纲数 / 非 `UnitArray` 比较**（如 `a == 0`、`a < 0`、`a == FixedArray("0")`） | 内部返回 `NotImplemented`，允许对方尝试反向比较，最终判定为 `False` / `True`                                 | 内部返回 `NotImplemented`，允许对方尝试反向比较，**最终由 Python 抛出 `TypeError`**        | 带单位对象与裸数字（哪怕是 `0`）量纲不同，绝不静默相等或比大小；判断是否为零请始终使用 [`a.is_zero()`](#unitarrayis_zero) |
+| 比较场景                                                                                        | `a == b` / `a != b`                                                                                          | `a < b` / `a <= b` / `a > b` / `a >= b`                                                    | 设计原因                                                                                                                  |
+|-------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------|
+| **同子类且单位兼容**（如 `Money("1", "USD")` 与 `Money("2", "USD")`）                           | 委托 `self._data == other._data`，0 维返回 `np.bool_`，高维返回 `bool` 数组（形状无法广播时抛 `ValueError`） | 委托 `self._data < other._data`，0 维返回 `np.bool_`，高维返回 `bool` 数组                 | 同量纲数值可直接按定点数对齐 `scale` 后逐元素比较                                                                         |
+| **同为 `UnitArray` 但单位不兼容**（如 `USD` 与 `CNY`，或 `Money` 与 [`Quantity`](quantity.md)） | 内部返回 `NotImplemented`，Python 最终判定为 `False` / `True`（**不抛异常**）                                | 调用 `self._check_compatible(other)`，**立即抛出子类的 `TypeError`**（含具体单位冲突原因） | 字典查找、`in` 成员检测要求 `==` 永不因类型/单位不同而崩溃；但“100 美元是否小于 200 人民币”属于逻辑错误，必须显式报错     |
+| **与无量纲数 / 非 `UnitArray` 比较**（如 `a == 0`、`a < 0`、`a == FixedArray("0")`）            | 内部返回 `NotImplemented`，允许对方尝试反向比较，最终判定为 `False` / `True`                                 | 内部返回 `NotImplemented`，允许对方尝试反向比较，**最终由 Python 抛出 `TypeError`**        | 带单位对象与裸数字（哪怕是 `0`）量纲不同，绝不静默相等或比大小；判断是否为零请始终使用 [`a.is_zero()`](#unitarrayis_zero) |
 
 ## API 速查表
 
 | 分类                     | 接口 / 运算符                                                                                                           | 功能说明                                                             |
 |--------------------------|-------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------|
+| **警告类**               | [`PrecisionLossWarning`](#precisionlosswarning)                                                                         | 精确输入超出目标精度并被舍入时发出的警告                             |
 | **抽象基类与扩展钩子**   | [`UnitArray`](#unitarray)                                                                                               | 带单位/量纲定点数张量的抽象基类（`ABC`）                             |
 |                          | [`UnitArray._create_like`](#unitarray_create_like)                                                                      | 抽象钩子：用新 `FixedArray` 构造同单位的当前子类实例                 |
 |                          | [`UnitArray._check_compatible`](#unitarray_check_compatible)                                                            | 抽象钩子：校验另一对象是否与当前实例量纲兼容                         |
@@ -111,10 +114,46 @@ CNY
 |                          | [`UnitArray.to_pandas`](#unitarrayto_pandas)                                                                            | 导出为 `pandas.Series` 或 `DataFrame`                                |
 |                          | [`UnitArray.to_polars`](#unitarrayto_polars)                                                                            | 导出为 `polars.Series`                                               |
 |                          | [`UnitArray.__array__` 与 NumPy 防护机制](#unitarrayarray-与-numpy-防护机制)                                            | 拦截隐式转 `ndarray` 与 `ufunc`，防止单位静默丢失                    |
-| **内部辅助（私有 API）** | [`UnitArray._compatible_or_none`](#unitarray_compatible_or_none)                                                        | 捕获 `_check_compatible` 异常并转为布尔返回值（供 `==` / `!=` 使用） |
+| **内部辅助（私有 API）** | [`UnitArray._as_factor`](#unitarray_as_factor)                                                                          | 校验无量纲数值白名单并转为 `FixedArray`                              |
+|                          | [`UnitArray._check_unit`](#unitarray_check_unit)                                                                        | 校验单位字符串非空并去除首尾空白                                     |
+|                          | [`UnitArray._compatible_or_none`](#unitarray_compatible_or_none)                                                        | 捕获 `_check_compatible` 异常并转为布尔返回值（供 `==` / `!=` 使用） |
 |                          | [`UnitArray._ordered`](#unitarray_ordered)                                                                              | 校验有序比较的操作数类型与量纲兼容性并分发比较函数                   |
 
-## 抽象基类与子类扩展契约
+## 警告类与抽象基类契约
+
+### PrecisionLossWarning
+
+```python
+class moneta.PrecisionLossWarning(UserWarning)
+```
+
+当构造带量纲张量（如 [`Money`](money.md) 或显式指定 `scale` 的 [`Quantity`](quantity.md)）时，非浮点数的精确输入（`str`、
+`Decimal`、`Fraction`、`FixedArray` 等）小数位数超过目标精度、被自动按 `half_up` 舍入时发出的警告。
+
+**机制说明**
+
+继承自内置 `UserWarning`。浮点数（`float` / `float64` 数组）因本身属于二进制近似值，在构造时直接按最短写法 `half_up`
+静默舍入而不触发此警告；精确十进制输入超出目标精度时则会先发出 `PrecisionLossWarning` 再舍入。可通过
+`warnings.simplefilter("error", PrecisionLossWarning)` 将其升级为异常。
+
+**示例**
+
+```python
+>> > import warnings
+>> > from moneta import Money, Quantity, PrecisionLossWarning
+>> > with warnings.catch_warnings(record=True) as w:
+    ...
+warnings.simplefilter("always")
+...
+q = Quantity("1.25", scale=1)
+...(q, len(w), issubclass(w[0].category, PrecisionLossWarning))
+(Quantity(FixedArray(1.3, scale=1), unit='share'), 1, True)
+```
+
+**另请参阅**
+
+- [`Money(values, currency)`](money.md#moneyvalues-currency)
+- [`Quantity(values, unit="share", scale=None)`](quantity.md#quantityvalues-unitshare-scalenone)
 
 ### UnitArray
 
@@ -139,8 +178,8 @@ class moneta.UnitArray(ABC)
 
 **机制说明**
 
-`UnitArray` 继承自 `abc.ABC`。在下面的文档示例中，除了使用内置子类 `Money`、`Price`、`Quantity` 外，我们也会使用一个最小自定义子类
-`Length` 来直观展示基类的扩展方式：
+`UnitArray` 继承自 `abc.ABC`。在下面的文档示例中，除了使用内置子类 [`Money`](money.md)、[`Price`](price.md)、[
+`Quantity`](quantity.md) 外，我们也会使用一个最小自定义子类 `Length` 来直观展示基类的扩展方式：
 
 **示例**
 
@@ -153,7 +192,7 @@ Traceback(most
 recent
 call
 last):
-...
+    ...
 TypeError: Can
 't instantiate abstract class UnitArray without an implementation for abstract methods '
 _check_compatible
@@ -252,8 +291,6 @@ Length(FixedArray(2.25, scale=2), unit='km')
 
 ```python
 @abstractmethod
-
-
 UnitArray._create_like(new_data)
 ```
 
@@ -269,17 +306,18 @@ UnitArray._create_like(new_data)
 
 **机制说明**
 
-`UnitArray` 基类本身不知道子类的构造函数签名（例如 `Money` 需要 `currency`，`Price` 需要 `quote_currency`、`base_unit`、
-`tick_size`，`Quantity` 需要 `unit`）。
+`UnitArray` 基类本身不知道子类的构造函数签名（例如 `Money` 需要 `currency`，[`Price`](price.md) 需要 `quote_currency`、
+`base_unit`、`tick_size`，[`Quantity`](quantity.md) 需要 `unit`）。
 因此，基类中所有不改变单位的方法（`__neg__`、`__abs__`、`sum`、`__getitem__`、`__iter__`、`reshape`、`transpose`）在完成
 `self._data` 上的计算后，统一调用 `self._create_like(new_data)` 将结果重新包装为子类实例。
 
 内置子类的实现策略：
 
-- **`Money._create_like(new_data)`**：若 `new_data.scale != self._currency.digits` 则先 `rescale` 到币种精度，再通过
-  `self.__class__.__new__` 零拷贝绑定 `_data` 与 `_currency`；
-- **`Price._create_like(new_data)`**：返回携带相同 `quote_currency`、`base_unit` 与 `tick_size` 的新 `Price`；
-- **`Quantity._create_like(new_data)`**：返回携带相同 `unit` 的新 `Quantity`。
+- **[`Money._create_like(new_data)`](money.md#money_create_like)**：调用 [
+  `Money._wrap(new_data, self._currency)`](money.md#money_wrap) 校验 `new_data.scale == self._currency.digits` 并零拷贝构造同币种
+  `Money`；
+- **`Price._create_like(new_data)`**：返回携带相同 `quote_currency`、`base_unit` 与 `tick_size` 的新 [`Price`](price.md)；
+- **`Quantity._create_like(new_data)`**：返回携带相同 `unit` 的新 [`Quantity`](quantity.md)。
 
 **示例**
 
@@ -288,7 +326,7 @@ UnitArray._create_like(new_data)
 >> > m = Money(["10.00", "20.00"], "USD")
 >> > m._create_like(FixedArray(["5.50", "6.25"]))
 Money(FixedArray([5.50, 6.25], scale=2), currency='USD')
->> > p = Price("100.00", "USD", base_unit="barrel", tick_size="0.05")
+>> > p = Price("100.00", "USD", base_unit="barrel", tick_size=FixedArray("0.05"))
 >> > p2 = p._create_like(FixedArray("101.25"))
 >> > (p2.quote_currency.code, p2.base_unit, p2.tick_size)
 ('USD', 'barrel', FixedArray(0.05, scale=2))
@@ -303,8 +341,6 @@ Money(FixedArray([5.50, 6.25], scale=2), currency='USD')
 
 ```python
 @abstractmethod
-
-
 UnitArray._check_compatible(other)
 ```
 
@@ -328,7 +364,8 @@ UnitArray._check_compatible(other)
 `<=` / `>` / `>=`](#a--ba--ba--ba--b大小比较) 通过 [`_ordered`](#unitarray_ordered)）以及子类的同量纲二元运算（如
 `Money + Money`、`Quantity - Quantity`）均通过调用 `self._check_compatible(other)` 执行量纲安检：
 
-- **`Money._check_compatible(other)`**：要求 `isinstance(other, Money)` 且 `self._currency == other._currency`；
+- **[`Money._check_compatible(other)`](money.md#money_check_compatible)**：要求 `isinstance(other, Money)` 且
+  `self._currency == other._currency`；
 - **`Price._check_compatible(other)`**：要求 `isinstance(other, Price)` 且 `quote_currency` 与 `base_unit` 均相同；
 - **`Quantity._check_compatible(other)`**：要求 `isinstance(other, Quantity)` 且单位相同（或其中一方为通配单位 `"Any"`）。
 
@@ -385,11 +422,11 @@ UnitArray.data
 **示例**
 
 ```python
->> > a = Length([["1.5", "2"], ["3", "4"]], "m")
->> > a.data
+>>> a = Length([["1.5", "2"], ["3", "4"]], "m")
+>>> a.data
 FixedArray([[1.5, 2.0],
             [3.0, 4.0]], scale=1)
->> > type(a.data) is FixedArray
+>>> type(a.data) is FixedArray
 True
 ```
 
@@ -420,19 +457,15 @@ UnitArray.mantissa
 **示例**
 
 ```python
->> > a = Length(["1.50", "-2.25"], "m")
->> > a.mantissa
-array([150, -225])
->> > a.mantissa.flags.writeable
+>>> a = Length(["1.50", "-2.25"], "m")
+>>> a.mantissa
+array([ 150, -225])
+>>> a.mantissa.flags.writeable
 False
->> > a.mantissa[0] = 999
-Traceback(most
-recent
-call
-last):
-...
-ValueError: assignment
-destination is read - only
+>>> a.mantissa[0] = 999
+Traceback (most recent call last):
+    ...
+ValueError: assignment destination is read-only
 ```
 
 **另请参阅**
@@ -451,8 +484,9 @@ UnitArray.scale
 
 **机制说明**
 
-直接返回 `self._data.scale`（非负 Python `int`）。在 `Money` 中，`scale` 恒等于所属币种的 [
-`currency.digits`](currency.md#currencydigits)；在 `Price` 与 `Quantity` 中，`scale` 由输入数值自动推断或显式指定。
+直接返回 `self._data.scale`（非负 Python `int`）。在 [`Money`](money.md) 中，`scale` 恒等于所属币种的 [
+`currency.digits`](currency.md#currencydigits)；在 [`Price`](price.md) 与 [`Quantity`](quantity.md) 中，`scale`
+由输入数值自动推断或显式指定。
 
 **返回值**
 
@@ -461,10 +495,10 @@ UnitArray.scale
 **示例**
 
 ```python
->> > from moneta import Money, JPY, USD
->> > Money("19.99", USD).scale, Money(500, JPY).scale
+>>> from moneta import Money, JPY, USD
+>>> Money("19.99", USD).scale, Money(500, JPY).scale
 (2, 0)
->> > Length(["0.1", "0.125"], "m").scale
+>>> Length(["0.1", "0.125"], "m").scale
 3
 ```
 
@@ -492,9 +526,9 @@ UnitArray.shape
 **示例**
 
 ```python
->> > Length([["1.5", "2"], ["3", "4"]], "m").shape
+>>> Length([["1.5", "2"], ["3", "4"]], "m").shape
 (2, 2)
->> > Length("1.5", "m").shape
+>>> Length("1.5", "m").shape
 ()
 ```
 
@@ -522,9 +556,9 @@ UnitArray.ndim
 **示例**
 
 ```python
->> > Length("1.5", "m").ndim
+>>> Length("1.5", "m").ndim
 0
->> > Length([["1.5", "2"], ["3", "4"]], "m").ndim
+>>> Length([["1.5", "2"], ["3", "4"]], "m").ndim
 2
 ```
 
@@ -552,9 +586,9 @@ UnitArray.size
 **示例**
 
 ```python
->> > Length([["1.5", "2", "3"], ["4", "5", "6"]], "m").size
+>>> Length([["1.5", "2", "3"], ["4", "5", "6"]], "m").size
 6
->> > Length("1.5", "m").size
+>>> Length("1.5", "m").size
 1
 ```
 
@@ -581,7 +615,7 @@ UnitArray.dtype
 **示例**
 
 ```python
->> > Length("1.5", "m").dtype
+>>> Length("1.5", "m").dtype
 dtype('int64')
 ```
 
@@ -785,21 +819,13 @@ Length(FixedArray(10.75, scale=2), unit='km')
 中间和超过 `int64` 上限但正负相抵后未越界时仍能精确求和：
 
 ```python
->> > big = Length(FixedArray._from_mantissa(np.array([2 ** 63 - 1, 1, -1]), 0), "m")
->> > big.sum().mantissa
+>>> big = Length(FixedArray._from_mantissa(np.array([2**63 - 1, 1, -1]), 0), "m")
+>>> big.sum().mantissa
 array(9223372036854775807)
->> > np.sum(a, dtype=np.float64)
-Traceback(most
-recent
-call
-last):
-...
-TypeError: FixedArray.sum
-不支持
-out、dtype；要
-float
-请先
-to_float()
+>>> np.sum(a, dtype=np.float64)
+Traceback (most recent call last):
+    ...
+TypeError: FixedArray.sum 不支持 out、dtype；要 float 请先 to_float()
 ```
 
 **性能对比**
@@ -840,14 +866,14 @@ UnitArray.is_zero()
 **示例**
 
 ```python
->> > z = Length("0.00", "m")
->> > bool(z.is_zero()), isinstance(z.is_zero(), np.bool_)
+>>> z = Length("0.00", "m")
+>>> bool(z.is_zero()), isinstance(z.is_zero(), np.bool_)
 (True, True)
->> > z == 0  # 注意：带单位对象与裸数字 0 永远不相等！
+>>> z == 0  # 注意：带单位对象与裸数字 0 永远不相等！
 False
->> > arr = Length(["0", "1.5", "-0.0"], "m")
->> > arr.is_zero()
-array([True, False, True])
+>>> arr = Length(["0", "1.5", "-0.0"], "m")
+>>> arr.is_zero()
+array([ True, False,  True])
 ```
 
 **性能对比**
@@ -905,42 +931,34 @@ a != b
 同单位比较（自动对齐不同 `scale`）与广播：
 
 ```python
->> > bool(Length("1.10", "m") == Length("1.1", "m"))
+>>> bool(Length("1.10", "m") == Length("1.1", "m"))
 True
->> > Length(["1", "2"], "m") == Length(["1.0", "3.0"], "m")
-array([True, False])
->> > Length(["1", "2"], "m") != Length(["1.0", "3.0"], "m")
-array([False, True])
+>>> Length(["1", "2"], "m") == Length(["1.0", "3.0"], "m")
+array([ True, False])
+>>> Length(["1", "2"], "m") != Length(["1.0", "3.0"], "m")
+array([False,  True])
 ```
 
 跨单位、跨类型比较与容器成员检测（永不因量纲不兼容报错）：
 
 ```python
->> > Length("1", "m") == Length("1", "km")
+>>> Length("1", "m") == Length("1", "km")
 False
->> > Length("1", "m") != Length("1", "km")
+>>> Length("1", "m") != Length("1", "km")
 True
->> > Length("1", "m") == 1, Length("1", "m") == FixedArray("1")
+>>> Length("1", "m") == 1, Length("1", "m") == FixedArray("1")
 (False, False)
->> > Length("2", "m") in [0, "x", Length("2", "km"), Length("2.00", "m")]
+>>> Length("2", "m") in [0, "x", Length("2", "km"), Length("2.00", "m")]
 True
 ```
 
 同单位但形状不兼容属于真实维度错误，会抛出 `ValueError`：
 
 ```python
->> > Length(["1", "2"], "m") == Length(["1", "2", "3"], "m")
-Traceback(most
-recent
-call
-last):
-...
-ValueError: operands
-could
-not be
-broadcast
-together
-with shapes(2, )(3, )
+>>> Length(["1", "2"], "m") == Length(["1", "2", "3"], "m")
+Traceback (most recent call last):
+    ...
+ValueError: operands could not be broadcast together with shapes (2,) (3,)
 ```
 
 **性能对比**
@@ -1008,27 +1026,14 @@ Length(FixedArray(2, scale=0), unit='m')
 不同单位或与裸数字比大小时立即拦截：
 
 ```python
->> > Length("1", "m") < Length("1", "km")
-Traceback(most
-recent
-call
-last):
-...
-TypeError: 单位不匹配: m
-与
-km
->> > Length("1", "m") < 0
-Traceback(most
-recent
-call
-last):
-...
-TypeError: '<'
-not supported
-between
-instances
-of
-'Length' and 'int'
+>>> Length("1", "m") < Length("1", "km")
+Traceback (most recent call last):
+    ...
+TypeError: 单位不匹配: m 与 km
+>>> Length("1", "m") < 0
+Traceback (most recent call last):
+    ...
+TypeError: '<' not supported between instances of 'Length' and 'int'
 ```
 
 **性能对比**
@@ -1210,30 +1215,14 @@ iter(a)
 0 维标量禁止 `len()` 与 `iter()`，多元素数组禁止 `bool()`：
 
 ```python
->> > list(Length("5", "km"))
-Traceback(most
-recent
-call
-last):
-...
-TypeError: iteration
-over
-a
-0 - d
-Length
->> > bool(Length(["0", "0"], "km"))
-Traceback(most
-recent
-call
-last):
-...
-ValueError: The
-truth
-value
-of
-an
-array
-with more than one element is ambiguous.Use a.any() or a.all()
+>>> list(Length("5", "km"))
+Traceback (most recent call last):
+    ...
+TypeError: iteration over a 0-d Length
+>>> bool(Length(["0", "0"], "km"))
+Traceback (most recent call last):
+    ...
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
 ```
 
 **另请参阅**
@@ -1264,10 +1253,10 @@ UnitArray.to_float()
 **示例**
 
 ```python
->> > Length("1.5", "m").to_float()
+>>> Length("1.5", "m").to_float()
 1.5
->> > Length(["0.1", "0.25"], "m").to_float()
-array([0.1, 0.25])
+>>> Length(["0.1", "0.25"], "m").to_float()
+array([0.1 , 0.25])
 ```
 
 **另请参阅**
@@ -1296,9 +1285,9 @@ UnitArray.to_decimal()
 **示例**
 
 ```python
->> > Length("1.50", "m").to_decimal()
+>>> Length("1.50", "m").to_decimal()
 Decimal('1.50')
->> > Length(["0.1", "0.25"], "m").to_decimal()
+>>> Length(["0.1", "0.25"], "m").to_decimal()
 array([Decimal('0.10'), Decimal('0.25')], dtype=object)
 ```
 
@@ -1323,8 +1312,8 @@ UnitArray.to_pandas(index=None, name=None, as_float=True)
 
 **返回值**
 
-- **out** : *pandas.Series 或 pandas.DataFrame*（子类可在此基础上附加元数据，如 `Money.to_pandas` 会自动写入
-  `res.attrs["currency"] = self.currency.code`）。
+- **out** : *pandas.Series 或 pandas.DataFrame*（子类可在此基础上附加元数据，如 [
+  `Money.to_pandas`](money.md#moneyto_pandas) 会自动写入 `res.attrs["currency"] = self.currency.code`）。
 
 **异常**
 
@@ -1338,16 +1327,17 @@ UnitArray.to_pandas(index=None, name=None, as_float=True)
 **示例**
 
 ```python
->> > s = Length(["1.5", "2.0"], "m").to_pandas(index=["a", "b"], name="len")
->> > s.to_dict()
+>>> s = Length(["1.5", "2.0"], "m").to_pandas(index=["a", "b"], name="len")
+>>> s.to_dict()
 {'a': 1.5, 'b': 2.0}
->> > Length(["1.50"], "m").to_pandas(as_float=False).tolist()
+>>> Length(["1.50"], "m").to_pandas(as_float=False).tolist()
 [Decimal('1.50')]
 ```
 
 **另请参阅**
 
 - [`UnitArray.to_polars`](#unitarrayto_polars)
+- [`Money.to_pandas`](money.md#moneyto_pandas)
 - [`FixedArray.to_pandas`](fixed_array.md#fixedarrayto_pandas)
 
 ### UnitArray.to_polars
@@ -1379,7 +1369,7 @@ UnitArray.to_polars(name="value", as_float=True)
 **示例**
 
 ```python
->> > s = Length(["1.50", "2.25"], "m").to_polars(name="len")  # doctest: +SKIP
+>>> s = Length(["1.50", "2.25"], "m").to_polars(name="len")  # doctest: +SKIP
 ```
 
 **另请参阅**
@@ -1419,40 +1409,19 @@ UnitArray.__array_ufunc__ = None
 **示例**
 
 ```python
->> > a = Length(["1", "2"], "m")
->> > np.asarray(a)
-Traceback(most
-recent
-call
-last):
-...
-TypeError: Length
-不能隐式转成数组：要
-float
-请用
-to_float()，要整数尾数请用.mantissa
->> > np.sqrt(a)
-Traceback(most
-recent
-call
-last):
-...
-TypeError: operand
-'Length'
-does
-not support
-ufuncs(__array_ufunc__=None)
->> > np.add(a, a)
-Traceback(most
-recent
-call
-last):
-...
-TypeError: operand
-'Length'
-does
-not support
-ufuncs(__array_ufunc__=None)
+>>> a = Length(["1", "2"], "m")
+>>> np.asarray(a)
+Traceback (most recent call last):
+    ...
+TypeError: Length 不能隐式转成数组：要 float 请用 to_float()，要整数尾数请用 .mantissa
+>>> np.sqrt(a)
+Traceback (most recent call last):
+    ...
+TypeError: operand 'Length' does not support ufuncs (__array_ufunc__=None)
+>>> np.add(a, a)
+Traceback (most recent call last):
+    ...
+TypeError: operand 'Length' does not support ufuncs (__array_ufunc__=None)
 ```
 
 **另请参阅**
@@ -1462,6 +1431,113 @@ ufuncs(__array_ufunc__=None)
 - [`FixedArray` 的 NumPy 互操作机制](fixed_array.md#numpy-互操作机制)
 
 ## 内部辅助方法（私有 API）
+
+### UnitArray._as_factor
+
+```python
+@staticmethod
+
+
+UnitArray._as_factor(other, what)
+```
+
+校验 `other` 是否属于无量纲数值操作数白名单，并将其转换为 [`FixedArray`](fixed_array.md)。
+
+**参数**
+
+- **other** : *Any* — 待校验的无量纲操作数。
+- **what** : *str* — 用于拼装错误提示的角色名称（如 `"乘数"`、`"除数"`、`"步长"`、`"权重"`）。
+
+**返回值**
+
+- **out** : *FixedArray*
+
+**异常**
+
+- **TypeError** — `FixedArray._is_numeric_operand(other)` 为 `False`（拒绝字符串、布尔值与带单位的 `UnitArray` 对象）。
+
+**机制说明**
+
+内部直接调用 [`FixedArray._coerce(other, strict=False)`](fixed_array.md#fixedarray_coerce)：若返回 `None`
+（不在数值白名单内），则抛出带有业务角色名 `what` 的 `TypeError`；否则返回转换后的 `FixedArray`。供 [`Money`](money.md)、[
+`Quantity`](quantity.md) 等子类的乘除与步长对齐方法复用。
+
+**示例**
+
+```python
+>> > UnitArray._as_factor(1.5, "乘数")
+FixedArray(1.5, scale=1)
+>> > UnitArray._as_factor("1.5", "乘数")
+Traceback(most
+recent
+call
+last):
+...
+TypeError: 乘数只接受数值（int、float、Decimal、Fraction、FixedArray
+或数值数组），收到
+str
+```
+
+**另请参阅**
+
+- [`FixedArray._is_numeric_operand`](fixed_array.md#fixedarray_is_numeric_operand)
+- [`FixedArray._coerce`](fixed_array.md#fixedarray_coerce)
+
+### UnitArray._check_unit
+
+```python
+@staticmethod
+
+
+UnitArray._check_unit(unit)
+```
+
+校验标的单位或量纲标签是否为非空字符串，并返回去除首尾空白后的字符串。
+
+**参数**
+
+- **unit** : *Any* — 待校验的单位名称。
+
+**返回值**
+
+- **out** : *str* — 去除首尾空白后的非空字符串。
+
+**异常**
+
+- **TypeError** — `not isinstance(unit, str)`。
+- **ValueError** — `unit.strip()` 为空字符串 `""`。
+
+**机制说明**
+
+供 [`Price`](price.md) 与 [`Quantity`](quantity.md) 构造器统一校验 `base_unit` / `unit` 参数。
+
+**示例**
+
+```python
+>> > UnitArray._check_unit("  barrel ")
+'barrel'
+>> > UnitArray._check_unit("   ")
+Traceback(most
+recent
+call
+last):
+...
+ValueError: 单位不能为空
+>> > UnitArray._check_unit(123)
+Traceback(most
+recent
+call
+last):
+...
+TypeError: 单位必须是
+str，收到
+int
+```
+
+**另请参阅**
+
+- [`Price`](price.md#pricevalues-quote_currency-base_unitshare-tick_sizenone-scalenone)
+- [`Quantity`](quantity.md#quantityvalues-unitshare-scalenone)
 
 ### UnitArray._compatible_or_none
 

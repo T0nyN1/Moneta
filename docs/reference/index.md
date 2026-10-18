@@ -13,18 +13,18 @@
 
 ## 量纲与币种
 
-| 模块                             | 公开接口                                                                                                                                                                                                                                                             | 说明                                                                  |
-|----------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------|
-| `moneta.unit_array`              | `UnitArray`                                                                                                                                                                                                                                                          | 带单位的定点数张量，自动校验并拒绝跨量纲非法运算                      |
-| [`moneta.currency`](currency.md) | [`Currency`](currency.md#currencycode-digits-symbol-name)、[`CurrencyRegistry`](currency.md#currencyregistry)、[`get_currency`](currency.md#get_currency)、[`CNY` `USD` `EUR` `JPY` `GBP` `HKD` `AUD` `CAD` `CHF` `SGD`](currency.md#usdcnyeurjpygbphkdaudcadchfsgd) | 币种定义（ISO 代码、原子精度 `digits`）、享元注册表与内置常用币种常量 |
+| 模块                                 | 公开接口                                                                                                                                                                                                                                                             | 说明                                                                  |
+|--------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------|
+| [`moneta.unit_array`](unit_array.md) | [`UnitArray`](unit_array.md#unitarray)、[`PrecisionLossWarning`](unit_array.md#precisionlosswarning)                                                                                                                                                                 | 带单位的定点数张量抽象基类，统一提供保单位变换与跨量纲比较安检        |
+| [`moneta.currency`](currency.md)     | [`Currency`](currency.md#currencycode-digits-symbol-name)、[`CurrencyRegistry`](currency.md#currencyregistry)、[`get_currency`](currency.md#get_currency)、[`CNY` `USD` `EUR` `JPY` `GBP` `HKD` `AUD` `CAD` `CHF` `SGD`](currency.md#usdcnyeurjpygbphkdaudcadchfsgd) | 币种定义（ISO 代码、原子精度 `digits`）、享元注册表与内置常用币种常量 |
 
 ## 金额、价格与数量
 
-| 模块              | 公开接口                   | 说明                                                                     |
-|-------------------|----------------------------|--------------------------------------------------------------------------|
-| `moneta.money`    | `Money`、`calc_tiered_fee` | 绑定单一币种的金额张量（`scale` 恒等于币种精度）、守恒分配与阶梯费率计算 |
-| `moneta.price`    | `Price`                    | 单位标的报价张量，支持最小变动价位（tick size）网格约束                  |
-| `moneta.quantity` | `Quantity`                 | 份额、手数、合约数等数量张量                                             |
+| 模块                             | 公开接口                                                                                                   | 说明                                                                               |
+|----------------------------------|------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------|
+| [`moneta.money`](money.md)       | [`Money`](money.md#moneyvalues-currency)、[`PrecisionLossWarning`](money.md#precisionlosswarning)          | 绑定单一币种的金额张量（`scale` 恒等于币种精度）、守恒分配与阶梯费率计算           |
+| [`moneta.price`](price.md)       | [`Price`](price.md#pricevalues-quote_currency-base_unitshare-tick_sizenone-scalenone)                      | 单位标的报价张量（`[计价货币/基准单位]`），支持 `tick_size` 报价网格与成交金额计算 |
+| [`moneta.quantity`](quantity.md) | [`Quantity`](quantity.md#quantityvalues-unitshare-scalenone)、[`WILDCARD_UNIT`](quantity.md#wildcard_unit) | 份额、手数、合约数等数量张量（默认精确运算，支持通配单位 `"Any"` 与显式步长取整）  |
 
 ## 标的、持仓与组合
 

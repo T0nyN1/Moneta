@@ -21,6 +21,10 @@ import numpy as np
 from .fixed_array import FixedArray
 
 
+class PrecisionLossWarning(UserWarning):
+    """精确输入（str、Decimal、Fraction、FixedArray 等）超出目标精度、被舍入时发出的警告。"""
+
+
 class UnitArray(ABC):
     """带单位/量纲的定点数张量抽象基类。
 
@@ -43,6 +47,25 @@ class UnitArray(ABC):
     def _check_compatible(self, other: Any) -> None:
         """检查另一个对象是否与当前实例在单位/量纲上兼容。不兼容时抛出 TypeError 或 ValueError。"""
         pass
+
+    @staticmethod
+    def _as_factor(other: Any, what: str) -> FixedArray:
+        """把无量纲操作数转为 FixedArray；只接受数值白名单内的类型（拒绝字符串、布尔与带单位对象）。"""
+        factor = FixedArray._coerce(other, strict=False)
+        if factor is None:
+            raise TypeError(f"{what}只接受数值（int、float、Decimal、Fraction、FixedArray 或数值数组），"
+                            f"收到 {type(other).__name__}")
+        return factor
+
+    @staticmethod
+    def _check_unit(unit: Any) -> str:
+        """单位必须是非空 str，去掉首尾空白后返回。"""
+        if not isinstance(unit, str):
+            raise TypeError(f"单位必须是 str，收到 {type(unit).__name__}")
+        unit = unit.strip()
+        if not unit:
+            raise ValueError("单位不能为空")
+        return unit
 
     # ---------- 底层数据与数组属性 ----------
 
@@ -201,4 +224,4 @@ class UnitArray(ABC):
         return self._data.to_polars(name=name, as_float=as_float)
 
 
-__all__ = ["UnitArray"]
+__all__ = ["PrecisionLossWarning", "UnitArray"]

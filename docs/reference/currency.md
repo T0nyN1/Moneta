@@ -4,18 +4,18 @@
 它是上层 `Money`、`ExchangeRate` 与 `Portfolio`  enforcing 量纲安全与法定精度对齐的基础：同一币种代码在全局注册表中保证只有唯一事实定义，不允许被篡改或静默覆盖。
 
 ```python
->> > from moneta import Currency, CurrencyRegistry, get_currency, USD, CNY, JPY
->> > USD
+>>> from moneta import Currency, CurrencyRegistry, get_currency, USD, CNY, JPY
+>>> USD
 Currency(code='USD', digits=2, symbol='$', name='US Dollar')
->> > get_currency("usd") is USD
+>>> get_currency("usd") is USD
 True
->> > JPY.digits
+>>> JPY.digits
 0
->> > usdt = Currency("USDT", 6, "₮", "Tether")
->> > CurrencyRegistry.register(usdt)
->> > get_currency("USDT") is usdt
+>>> usdt = Currency("USDT", 6, "₮", "Tether")
+>>> CurrencyRegistry.register(usdt)
+>>> get_currency("USDT") is usdt
 True
->> > CurrencyRegistry.clear()
+>>> CurrencyRegistry.clear()
 ```
 
 [← API 参考](index.md)
@@ -255,10 +255,10 @@ Currency.digits
 **示例**
 
 ```python
->> > from moneta import USD, JPY, Currency
->> > USD.digits, JPY.digits
+>>> from moneta import USD, JPY, Currency
+>>> USD.digits, JPY.digits
 (2, 0)
->> > Currency("BHD", 3).digits
+>>> Currency("BHD", 3).digits
 3
 ```
 
@@ -287,8 +287,8 @@ Currency.symbol
 **示例**
 
 ```python
->> > from moneta import USD, CNY, EUR, HKD
->> > (USD.symbol, CNY.symbol, EUR.symbol, HKD.symbol)
+>>> from moneta import USD, CNY, EUR, HKD
+>>> (USD.symbol, CNY.symbol, EUR.symbol, HKD.symbol)
 ('$', '¥', '€', 'HK$')
 ```
 
@@ -317,10 +317,10 @@ Currency.name
 **示例**
 
 ```python
->> > from moneta import USD, JPY, Currency
->> > USD.name, JPY.name
+>>> from moneta import USD, JPY, Currency
+>>> USD.name, JPY.name
 ('US Dollar', 'Japanese Yen')
->> > Currency("USDT", 6).name
+>>> Currency("USDT", 6).name
 'USDT'
 ```
 
@@ -360,14 +360,14 @@ hash(c)
 **示例**
 
 ```python
->> > from moneta import Currency, USD, CNY, get_currency
->> > Currency("ABC", 2, "$", "Alpha") == Currency("abc", 2)  # symbol 与 name 不影响相等
+>>> from moneta import Currency, USD, CNY, get_currency
+>>> Currency("ABC", 2, "$", "Alpha") == Currency("abc", 2)  # symbol 与 name 不影响相等
 True
->> > Currency("ABC", 2) == Currency("ABC", 3)  # digits 不同则不等
+>>> Currency("ABC", 2) == Currency("ABC", 3)  # digits 不同则不等
 False
->> > USD == "USD"  # 与字符串比较为 False
+>>> USD == "USD"  # 与字符串比较为 False
 False
->> > len({USD, get_currency("usd"), Currency("USD", 2, "$", "US Dollar"), CNY})
+>>> len({USD, get_currency("usd"), Currency("USD", 2, "$", "US Dollar"), CNY})
 2
 ```
 
@@ -444,12 +444,12 @@ repr(c)
 **示例**
 
 ```python
->> > from moneta import USD
->> > str(USD)
+>>> from moneta import USD
+>>> str(USD)
 'USD'
->> > repr(USD)
+>>> repr(USD)
 "Currency(code='USD', digits=2, symbol='$', name='US Dollar')"
->> > f"结算币种：{USD}"
+>>> f"结算币种：{USD}"
 '结算币种：USD'
 ```
 
@@ -754,10 +754,10 @@ True
 **示例**
 
 ```python
->> > from moneta import USD, CNY, EUR, JPY, GBP, HKD, AUD, CAD, CHF, SGD, get_currency
->> > [(c.code, c.digits, c.symbol) for c in (USD, CNY, EUR, JPY, GBP)]
+>>> from moneta import USD, CNY, EUR, JPY, GBP, HKD, AUD, CAD, CHF, SGD, get_currency
+>>> [(c.code, c.digits, c.symbol) for c in (USD, CNY, EUR, JPY, GBP)]
 [('USD', 2, '$'), ('CNY', 2, '¥'), ('EUR', 2, '€'), ('JPY', 0, '¥'), ('GBP', 2, '£')]
->> > all(get_currency(c.code) is c for c in (USD, CNY, EUR, JPY, GBP, HKD, AUD, CAD, CHF, SGD))
+>>> all(get_currency(c.code) is c for c in (USD, CNY, EUR, JPY, GBP, HKD, AUD, CAD, CHF, SGD))
 True
 ```
 
