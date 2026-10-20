@@ -7,9 +7,11 @@
 
 ## 数值内核
 
-| 模块                                   | 公开接口                                                                      | 说明                                                 |
-|----------------------------------------|-------------------------------------------------------------------------------|------------------------------------------------------|
-| [`moneta.fixed_array`](fixed_array.md) | [`FixedArray`](fixed_array.md)、[`RoundingMode`](fixed_array.md#roundingmode) | 基于 `int64` 尾数的定点数 N 维张量与六种金融舍入模式 |
+| 模块                                   | 公开与核心接口                                                                                                                                                                                                                                                                                                     | 说明                                                               |
+|----------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------|
+| [`moneta.fixed_array`](fixed_array.md) | [`FixedArray`](fixed_array.md#fixedarrayvalues-scalenone-masknone)、[`RoundingMode`](fixed_array.md#roundingmode)                                                                                                                                                                                                  | 基于 `int64` 尾数与缺失值掩码 `mask` 的定点数 N 维张量引擎         |
+| [`moneta._rounding`](_rounding.md)     | [`RoundingMode`](_rounding.md#roundingmode)、[`check_rounding`](_rounding.md#check_rounding)、[`decide_bump`](_rounding.md#decide_bump)、[`round_quotient`](_rounding.md#round_quotient)                                                                                                                           | 6 种金融与会计舍入规则枚举、双基准坐标系进位裁决与无溢出商舍入引擎 |
+| [`moneta._limbs`](_limbs.md)           | [`split_int64`](_limbs.md#split_int64)、[`normalize_limbs`](_limbs.md#normalize_limbs)、[`limbs_mul`](_limbs.md#limbs_mul)、[`limbs_matmul`](_limbs.md#limbs_matmul)、[`limbs_sum`](_limbs.md#limbs_sum)、[`limbs_round_div_pow10`](_limbs.md#limbs_round_div_pow10)、[`limbs_to_int64`](_limbs.md#limbs_to_int64) | 二进制 Base $2^{21}$ 动态分块多精度无溢出整数算术与长除法内核      |
 
 ## 量纲与币种
 

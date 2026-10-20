@@ -15,7 +15,7 @@
 - ``/``：默认 scale = max(两侧 scale)，half_up；``divide(other, scale, rounding)`` 指定精度。
 
 组织：按源码顺序分节——舍入模式、构造、属性、内部工具、算术、规约、形状、精度、比较、
-NumPy 协议、导出、展示，最后是已知缺陷。每节含示例测试与固定种子的随机对拍。
+NumPy 协议、导出、展示、缺失值（NA），最后是缺陷回归测试。每节含示例测试与固定种子的随机对拍。
 曾经确认的缺陷放在 TestRegressions 中防止回归；新发现的缺陷先用 ``xfail(strict=True)``
 固定预期行为，修复后会变成 XPASS 报错，届时删除标记并移入 TestRegressions。
 """
@@ -35,6 +35,7 @@ import pytest
 
 import moneta.fixed_array as fixed_array_module
 from moneta import Money, Quantity
+from moneta._limbs import limbs_mul
 from moneta.fixed_array import FixedArray as F, RoundingMode
 
 MIN, MAX = -(2 ** 63), 2 ** 63 - 1
@@ -122,17 +123,7 @@ def run_isolated(code: str) -> str:
 
 
 class TestRoundingMode:
-    def test_members_and_str_compat(self):
-        assert MODES == ["half_up", "half_even", "down", "up", "floor", "ceil"]
-        assert RoundingMode.HALF_EVEN == "half_even" and isinstance(RoundingMode.UP, str)
-
-    def test_check_rounding(self):
-        for mode in RoundingMode:
-            assert F._check_rounding(mode) == mode.value
-            assert F._check_rounding(mode.value) == mode.value
-        for bad in ("nearest", "HALF_UP", "", None, 1):
-            with pytest.raises(ValueError, match="rounding 只能是"):
-                F._check_rounding(bad)
+    """枚举本身与 check_rounding、decide_bump 见 test_rounding.py。"""
 
     @pytest.mark.parametrize("mode", list(RoundingMode))
     def test_every_rounding_api_accepts_enum(self, mode):
@@ -349,12 +340,20 @@ class TestConstructFloat:
         with pytest.raises(OverflowError):
             F(np.array(values))
 
-    @pytest.mark.parametrize("value", [np.nan, np.inf, -np.inf, np.array([1.0, np.inf]), np.array([np.nan])])
-    def test_non_finite(self, value):
-        with pytest.raises(ValueError):
+    @pytest.mark.parametrize("value", [np.inf, -np.inf, np.array([1.0, np.inf]), np.array([np.nan, -np.inf])])
+    def test_infinity_rejected(self, value):
+        with pytest.raises(ValueError, match="无穷大"):
             F(value)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="无穷大"):
             F(value, scale=2)
+
+    def test_nan_is_missing_value(self):
+        a = F(np.array([1.5, np.nan, -2.25]))
+        assert a.isna().tolist() == [False, True, False] and (a.mantissa.tolist(), a.scale) == ([150, 0, -225], 2)
+        b = F(np.array([np.nan, 0.1]), scale=3)
+        assert b.isna().tolist() == [True, False] and b.mantissa.tolist() == [0, 100]
+        assert F(np.nan).isna() and F(np.float32("nan"), scale=2).scale == 2
+        assert F(np.array([np.nan])).isna().tolist() == [True]
 
 
 class TestConstructExact:
@@ -430,7 +429,7 @@ class TestConstructExact:
         with pytest.raises(ValueError):
             F(["1.234"], scale=2)
 
-    @pytest.mark.parametrize("value", ["abc", "nan", "inf", "-Infinity", "", ["1", "x"],
+    @pytest.mark.parametrize("value", ["abc", "inf", "-Infinity", "", "nanx", ["1", "x"],
                                        np.array([Decimal("1"), "x"], dtype=object)])
     def test_unparseable(self, value):
         with pytest.raises(ValueError):
@@ -575,7 +574,7 @@ class TestOperandWhitelist:
         assert isinstance(F._coerce(ok), F)
         assert isinstance(F("1") + ok, F)
 
-    @pytest.mark.parametrize("bad", ["1", b"1", True, np.bool_(True), None, object(), {"a": 1}, {1},
+    @pytest.mark.parametrize("bad", ["1", b"1", True, np.bool_(True), object(), {"a": 1}, {1},
                                      np.array(["1"]), np.array([b"1"]), np.array(["1"], dtype=object),
                                      np.array([True]), ["1", 2], (1, "2"), [1, [2, "3"]], np.array([1 + 2j]),
                                      1 + 2j, Quantity(1, unit="share"), Money("1", "USD")])
@@ -585,7 +584,7 @@ class TestOperandWhitelist:
         with pytest.raises(TypeError, match="只能与数值类型"):
             F._coerce(bad)
 
-    @pytest.mark.parametrize("bad", ["1", b"1", True, None, object(), np.array(["1"]), np.array(["1"], dtype=object),
+    @pytest.mark.parametrize("bad", ["1", b"1", True, object(), np.array(["1"]), np.array(["1"], dtype=object),
                                      ["1", 2], (1, "2"), np.array([1 + 2j])])
     def test_arithmetic_rejects(self, bad):
         for op in (lambda: F("1") + bad, lambda: bad + F("1"), lambda: F("1") - bad, lambda: bad - F("1"),
@@ -594,7 +593,7 @@ class TestOperandWhitelist:
             with pytest.raises(TypeError):
                 op()
 
-    @pytest.mark.parametrize("bad", ["1", True, None, Quantity(1, unit="share")])
+    @pytest.mark.parametrize("bad", ["1", True, Quantity(1, unit="share")])
     def test_comparison_rejects(self, bad):
         assert (F("1") == bad) is False
         assert (F("1") != bad) is True
@@ -634,13 +633,21 @@ class TestOperandWhitelist:
         with pytest.raises(ValueError):
             F("1") + Fraction(1, 3)
         with pytest.raises(ValueError):
-            F("1") + float("nan")
+            F("1") + float("inf")
         with pytest.raises(ValueError):
             F("1") + [1, [2]]  # 不规则嵌套
         with pytest.raises(OverflowError):
             F("1") + 10 ** 30
-        assert (F("1") == float("nan")) is False
-        assert (F("1") == 10 ** 30) is False
+        for other in (float("inf"), 10 ** 30):  # 无法表示的值视为不相等，返回 NumPy bool
+            eq = F("1") == other
+            assert isinstance(eq, np.bool_) and not eq and (F("1") != other)
+
+    @pytest.mark.parametrize("na", [None, float("nan"), np.float32("nan")])
+    def test_none_and_nan_are_missing_values(self, na):
+        assert F._is_numeric_operand(na) is True and F._coerce(na).isna()
+        assert (F("1") + na).isna() and (na + F("1")).isna() and (F(["1", "2"]) * na).isna().tolist() == [True, True]
+        eq = F("1") == na
+        assert isinstance(eq, np.bool_) and not eq and (F("1") != na) and not (F("1") < na)
 
 
 class TestIntegerHelpers:
@@ -693,39 +700,6 @@ class TestIntegerHelpers:
             F._align_scales(raw(MAX, 0), F("0.1"))
 
 
-class TestDecideBump:
-    """统一舍入裁决：Truncation Base（作用于 |q|）与 Floor Base（作用于有符号 q）。"""
-
-    @pytest.mark.parametrize("mode", MODES)
-    def test_against_reference_on_halves_grid(self, mode):
-        # 以 x = 整数部分 + 小数部分 的全部组合检验两种坐标系
-        for whole in (-3, -2, -1, 0, 1, 2):
-            for frac in (Fraction(0), Fraction(1, 4), Fraction(1, 2), Fraction(3, 4)):
-                x = whole + frac if whole >= 0 else whole - frac
-                want = ref_round(x, mode)
-                # Floor Base：q = floor(x)
-                q = x.numerator // x.denominator
-                r = x - q
-                bump = F._decide_bump(mode, is_negative=np.bool_(q < 0), odd_q=np.bool_(q % 2 != 0),
-                                      has_fraction=np.bool_(r != 0), over_half=np.bool_(r > Fraction(1, 2)),
-                                      exact_half=np.bool_(r == Fraction(1, 2)), floor_base=True)
-                assert q + int(bump) == want, (mode, x)
-                # Truncation Base：作用于 |x| 的截断值
-                t = abs(x).numerator // abs(x).denominator
-                rt = abs(x) - t
-                bump_t = F._decide_bump(mode, is_negative=np.bool_(x < 0), odd_q=np.bool_(t % 2 != 0),
-                                        has_fraction=np.bool_(rt != 0), over_half=np.bool_(rt > Fraction(1, 2)),
-                                        exact_half=np.bool_(rt == Fraction(1, 2)), floor_base=False)
-                magnitude = t + int(bump_t)
-                assert (magnitude if x >= 0 else -magnitude) == want, (mode, x)
-
-    @pytest.mark.parametrize("floor_base", [True, False])
-    def test_invalid_mode(self, floor_base):
-        with pytest.raises(ValueError, match="rounding 只能是"):
-            F._decide_bump("unknown", is_negative=False, odd_q=False, has_fraction=True, over_half=False,
-                           exact_half=False, floor_base=floor_base)
-
-
 class TestDivmodRound:
     """_divmod_round(m, d, mode)：round(m / d)，m、d 为 int64 范围内的整数或数组，d 可正可负。"""
 
@@ -748,10 +722,6 @@ class TestDivmodRound:
         pairs = [(m, d) for m in ms for d in ds if (m, d) != (MIN, -1)]
         result = F._divmod_round(np.array([m for m, _ in pairs]), np.array([d for _, d in pairs]), mode)
         assert result.tolist() == [ref_round(Fraction(m, d), mode) for m, d in pairs]
-
-    def test_round_quotient_floor_short_circuit(self):
-        q, r = np.divmod(np.array([7, -7]), 2)
-        assert F._round_quotient(q, r, np.int64(2), "floor").tolist() == [3, -4]
 
     def test_errors(self):
         with pytest.raises(OverflowError):
@@ -840,87 +810,29 @@ class TestChunkedKernels:
         with pytest.raises(OverflowError, match="除法结果超出"):
             F._chunked_divmod_round(np.array([MAX]), np.array([1]), 1, "half_up")
 
-    def test_chunked_mul_round_random(self):
+    def test_limbs_to_mantissa_random(self):
+        """精确分块积 → 目标 scale：shift > 0 在分块上舍入一次，shift ≤ 0 收口后放大。"""
         rng = random.Random(22)
         for _ in range(3000):
             a, b = random_mantissa(rng), random_mantissa(rng)
             shift, mode = rng.randint(-20, 45), rng.choice(MODES)
             want = ref_round(Fraction(a * b) * Fraction(10) ** -shift, mode)
+            limbs = limbs_mul(np.int64(a), np.int64(b))
             if fits(want):
-                got = F._chunked_mul_round(np.int64(a), np.int64(b), shift, mode)
-                assert int(got) == want, (a, b, shift, mode)
+                assert int(F._limbs_to_mantissa(limbs, shift, mode)) == want, (a, b, shift, mode)
             else:
                 with pytest.raises(OverflowError):
-                    F._chunked_mul_round(np.int64(a), np.int64(b), shift, mode)
+                    F._limbs_to_mantissa(limbs, shift, mode)
 
-    @pytest.mark.parametrize("shift", [9, 18, 27, 54, 63, 81])
-    @pytest.mark.parametrize("mode", MODES)
-    def test_chunked_mul_round_block_boundaries(self, shift, mode):
-        # shift 为 9 的倍数时，舍入位恰好落在 10^9 块边界；≥ 54 时商的所有块都被舍去
-        for a, b in [(10 ** 18 + 5 * 10 ** 17, 7), (-(10 ** 18) - 5 * 10 ** 17, 3), (MAX, MAX), (MIN, 3),
-                     (5, 10 ** 17), (1, 1), (-1, 1)]:
-            want = ref_round(Fraction(a * b, 10 ** shift), mode)
-            if fits(want):
-                assert int(F._chunked_mul_round(np.int64(a), np.int64(b), shift, mode)) == want
-            else:
-                with pytest.raises(OverflowError):
-                    F._chunked_mul_round(np.int64(a), np.int64(b), shift, mode)
-
-    def test_chunked_mul_round_broadcast(self):
-        got = F._chunked_mul_round(np.array([[1], [2]]), np.array([10 ** 18, -(10 ** 18)]), 18, "half_up")
-        assert got.tolist() == [[1, -1], [2, -2]]
-
-    def test_chunked_sum_random(self):
-        rng = random.Random(23)
-        for _ in range(1500):
-            rows = [[random_mantissa(rng) for _ in range(rng.randint(1, 5))]] * rng.randint(1, 4)
-            arr = np.array(rows, dtype=np.int64)
-            for axis in (None, 0, 1, (0, 1)):
-                if axis in (None, (0, 1)):
-                    want = [sum(map(sum, rows))]
-                elif axis == 0:
-                    want = [sum(col) for col in zip(*rows)]
-                else:
-                    want = [sum(r) for r in rows]
-                if all(map(fits, want)):
-                    assert np.ravel(F._chunked_sum(arr, axis=axis)).tolist() == want
-                else:
-                    with pytest.raises(OverflowError):
-                        F._chunked_sum(arr, axis=axis)
-
-    def test_chunked_sum_boundaries(self):
-        assert int(F._chunked_sum(np.array([MAX, 0]))) == MAX
-        assert int(F._chunked_sum(np.array([MIN, 0]))) == MIN
-        assert F._chunked_sum(np.array([[MAX], [MIN]]), axis=1, keepdims=True).tolist() == [[MAX], [MIN]]
-        for bad in ([MAX, 1], [MIN, -1]):
-            with pytest.raises(OverflowError):
-                F._chunked_sum(np.array(bad))
-
-    def test_chunked_matmul_random(self):
-        rng = random.Random(24)
-        for _ in range(1500):
-            n, k, p = rng.randint(1, 3), rng.randint(1, 5), rng.randint(1, 3)
-            a = [[random_mantissa(rng) for _ in range(k)] for _ in range(n)]
-            b = [[random_mantissa(rng) for _ in range(p)] for _ in range(k)]
-            want = [sum(a[i][t] * b[t][j] for t in range(k)) for i in range(n) for j in range(p)]
-            if all(map(fits, want)):
-                got = F._chunked_matmul(np.array(a, dtype=np.int64), np.array(b, dtype=np.int64))
-                assert got.ravel().tolist() == want
-            else:
-                with pytest.raises(OverflowError):
-                    F._chunked_matmul(np.array(a, dtype=np.int64), np.array(b, dtype=np.int64))
-
-    def test_chunked_matmul_long_inner_dimension(self):
-        # 内积长度 2^18 的极端块值，结果放得下
-        rng = np.random.default_rng(25)
-        pool = np.array([-1, MIN, MAX, -(2 ** 42), 2 ** 42 - 1, (2 ** 21 - 1) << 21, -(2 ** 21)], dtype=np.int64)
-        k = 2 ** 18
-        a = pool[rng.integers(0, len(pool), k)]
-        b = pool[rng.integers(0, len(pool), k)].copy()
-        b[rng.random(k) < 0.99999] = 0
-        want = int(np.dot(a.astype(object), b.astype(object)))
-        assert fits(want)
-        assert int(F._chunked_matmul(a, b)) == want
+    def test_limbs_to_mantissa_arrays(self):
+        limbs = limbs_mul(np.array([[1], [2]]), np.array([10 ** 18, -(10 ** 18)]))
+        assert F._limbs_to_mantissa(limbs, 18, "half_up").tolist() == [[1, -1], [2, -2]]
+        assert F._limbs_to_mantissa(limbs_mul(np.array([3, 0]), np.array([4, 5])), -2, "half_up").tolist() == [1200, 0]
+        empty = limbs_mul(np.zeros(0, dtype=np.int64), np.zeros(0, dtype=np.int64))
+        assert F._limbs_to_mantissa(empty, -3, "half_up").shape == (0,)
+        assert F._limbs_to_mantissa(empty, 30, "half_up").shape == (0,)
+        with pytest.raises(OverflowError):
+            F._limbs_to_mantissa(limbs_mul(np.array([10 ** 17]), np.array([1])), -2, "half_up")
 
 
 # ===========================================================================
@@ -1089,6 +1001,13 @@ class TestMulRound:
         with warnings.catch_warnings():
             warnings.simplefilter("error")
             assert F("0").mul_round(F("5"), scale=3) == F("0.000")
+        # 空数组回归测试：shift < 0 和 shift > 18 均走分块路径
+        empty_mul_unrounded = F([]).mul_round(F([]), scale=3, rounding=None)
+        assert empty_mul_unrounded.shape == (0,)
+        assert empty_mul_unrounded.scale == 3
+        empty_mul_rounded = F([]).mul_round(F([]), scale=2, rounding="half_up")
+        assert empty_mul_rounded.shape == (0,)
+        assert empty_mul_rounded.scale == 2
 
     def test_overflow_true_positive(self):
         with pytest.raises(OverflowError):
@@ -1292,20 +1211,21 @@ class TestFloorDivMod:
     def test_python_semantics(self):
         a, b = F(["10.01", "-10.01"]), F("3")
         q, r = divmod(a, b)
-        assert q.tolist() == [3, -4] and decimals(r) == [Decimal("1.01"), Decimal("1.99")]
+        assert (q.mantissa.tolist(), q.scale) == ([3, -4], 0) and decimals(r) == [Decimal("1.01"), Decimal("1.99")]
         assert np.all(b * q + r == a)
-        assert (a // b).tolist() == [3, -4]
+        assert (a // b).mantissa.tolist() == [3, -4]
         assert decimals(a % b) == [Decimal("1.01"), Decimal("1.99")]
 
-    def test_scalar_quotient_is_int(self):
+    def test_quotient_is_scale_zero_fixed_array(self):
         q, r = divmod(F("10.01"), F("3"))
-        assert type(q) is int and q == 3 and decimals(r) == Decimal("1.01")
-        assert type(F("7") // 2) is int
+        assert isinstance(q, F) and (q.ndim, q.scale, int(q.mantissa)) == (0, 0, 3) and decimals(r) == Decimal("1.01")
+        q = F(["7.5", "-7.5"]) // F("0.2")
+        assert isinstance(q, F) and q.mask is None and (q.mantissa.tolist(), q.scale) == ([37, -38], 0)
 
     def test_reflected(self):
         x = F("2.5")
         assert 10 // x == 4 and 10 % x == F("0") and divmod(10, x) == (4, F("0"))
-        assert (np.array([10, 10]) // F(["2", "4"])).tolist() == [5, 2]
+        assert (np.array([10, 10]) // F(["2", "4"])).mantissa.tolist() == [5, 2]
         assert (np.array([7]) % F("2")).mantissa.tolist() == [1]
 
     def test_random_against_fraction(self):
@@ -1332,7 +1252,7 @@ class TestFloorDivMod:
 class TestReflectedOperators:
     @pytest.mark.parametrize("name", ["__radd__", "__rsub__", "__rmul__", "__rmatmul__", "__rtruediv__",
                                       "__rfloordiv__", "__rmod__", "__rdivmod__"])
-    @pytest.mark.parametrize("bad", ["1", True, None])
+    @pytest.mark.parametrize("bad", ["1", True])
     def test_return_not_implemented_for_non_numeric(self, name, bad):
         assert getattr(F("2"), name)(bad) is NotImplemented
 
@@ -1486,6 +1406,10 @@ class TestMean:
     def test_empty_inputs(self):
         empty_rows = F(np.zeros((0, 3), dtype=np.int64))
         assert empty_rows.mean(axis=1).shape == (0,)  # 每格 3 个元素，只是没有格子
+        assert empty_rows.sum(axis=1).shape == (0,)
+        assert empty_rows.sum(axis=0).shape == (3,)
+        empty_mat = empty_rows.matmul(F(np.zeros((3, 2), dtype=np.int64)))
+        assert empty_mat.shape == (0, 2)
         with pytest.raises(ZeroDivisionError):
             empty_rows.mean(axis=0)
         with pytest.raises(ZeroDivisionError):
@@ -1726,9 +1650,8 @@ class TestCompare:
         with pytest.raises(ValueError):
             F(["1", "2"]) < F(["1", "2", "3"])
 
-    def test_alignment_overflow_propagates_for_ordering(self):
-        with pytest.raises(OverflowError):
-            raw(MAX, 0) < F("0.1")
+    def test_ordering_never_aligns(self):  # 不放大低精度一侧，scale 差再大也不会溢出
+        assert not (raw(MAX, 0) < F("0.1")) and raw(MAX, 0) > F("0.1")
 
 
 # ===========================================================================
@@ -1795,8 +1718,6 @@ class TestToDecimal:
         rng = random.Random(13)
         for _ in range(1000):
             m, s = random_mantissa(rng), rng.randint(0, 18)
-            if m == MIN:
-                continue  # 见 TestKnownDefects.test_construct_int64_min_from_text
             d = raw(m, s).to_decimal()
             assert d == Fraction(m, 10 ** s) and F(d) == raw(m, s)
 
@@ -1889,7 +1810,308 @@ class TestDisplay:
 
 
 # ===========================================================================
-# 16. 缺陷回归测试（已修复）
+# 16. 缺失值（NA）
+# ===========================================================================
+
+
+def na(values, scale=None):
+    """带缺失值的 FixedArray：values 中的 None 为 NA。"""
+    return F(np.array(values, dtype=object), scale=scale)
+
+
+class TestNAConstruct:
+    def test_scalar_none(self):
+        a = F(None)
+        assert a.isna() and a.ndim == 0 and a.scale == 0 and int(a.mantissa) == 0
+        assert F(None, scale=3).scale == 3 and F(None, scale=3).isna()
+        with pytest.raises(ValueError, match="scale 必须是非负整数"):
+            F(None, scale=-1)
+
+    def test_object_and_list_inputs(self):
+        a = F([None, "1.5", Decimal("2")])
+        assert a.isna().tolist() == [True, False, False] and (a.mantissa.tolist(), a.scale) == ([0, 15, 20], 1)
+        assert F([1, None]).isna().tolist() == [False, True] and F([1, None]).scale == 0
+        assert F([[None, 1.5], [2, float("nan")]]).isna().tolist() == [[True, False], [False, True]]
+        assert F(np.array([None, Fraction(1, 4)], dtype=object)).mantissa.tolist() == [0, 25]
+        assert F([None, None]).isna().tolist() == [True, True] and F([None, None]).scale == 0
+
+    @pytest.mark.parametrize("missing", ["nan", "NaN", " -nan ", "sNaN", Decimal("NaN"), Decimal("-sNaN")])
+    def test_text_and_decimal_nan(self, missing):
+        assert F(missing).isna() and F(missing, scale=2).scale == 2
+        a = F(np.array(["1.5", missing], dtype=object))
+        assert a.isna().tolist() == [False, True] and (a.mantissa.tolist(), a.scale) == ([15, 0], 1)
+        if isinstance(missing, str):
+            b = F(np.array([missing, "2.25", missing]))  # 字符串数组走去重路径
+            assert b.isna().tolist() == [True, False, True] and b.mantissa.tolist() == [0, 225, 0]
+        else:
+            assert (F("1") + missing).isna() and not (F("1") == missing)
+
+    def test_is_missing(self):
+        pd = pytest.importorskip("pandas")
+        for v in (None, float("nan"), np.float32("nan"), Decimal("NaN"), "nan", "-NaN", pd.NA):
+            assert F._is_missing(v) is True
+        for v in (0, 1.5, Decimal("1"), "1.5", "nanx", "", "abc", Fraction(1, 2), np.inf):
+            assert F._is_missing(v) is False
+
+    def test_pandas_missing_values(self):
+        pd = pytest.importorskip("pandas")
+        assert F(pd.NA).isna()
+        assert F([pd.NA, 1]).isna().tolist() == [True, False]
+        assert F(pd.Series([1.5, None])).isna().tolist() == [False, True]
+        assert F(pd.array([1, None], dtype="Int64")).isna().tolist() == [False, True]
+
+    def test_mask_parameter(self):
+        a = F([1, 2, 3], mask=[False, True, False])
+        assert a.isna().tolist() == [False, True, False] and a.mantissa.tolist() == [1, 0, 3]
+        assert F([1, 2], mask=[0, 1]).isna().tolist() == [False, True]  # 非 bool 掩码按真值转换
+        assert F([1, 2], mask=True).isna().tolist() == [True, True]  # 标量掩码广播
+        assert F([1, 2], mask=[False, False]).mask is None  # 没有缺失值时不存掩码
+        assert F(np.array([1.0, 2.0]), mask=[False, False]).mask is None
+        assert F(np.array([np.nan, 1.0]), mask=[False, True]).isna().tolist() == [True, True]  # 与 NaN 合并
+        assert F(["1", None], mask=[True, False]).isna().tolist() == [True, True]  # 与 None 合并
+        assert F(["1.5", "2"], mask=[True, False], scale=2).mantissa.tolist() == [0, 200]
+        with pytest.raises(ValueError):
+            F([1, 2], mask=[True, False, True])
+
+    def test_from_fixed_array_keeps_mask(self):
+        a = na([None, "1.5"])
+        assert F(a).isna().tolist() == [True, False]
+        b = F(a, scale=3)
+        assert b.isna().tolist() == [True, False] and b.mantissa.tolist() == [0, 1500]
+        assert F(a, mask=[False, False]).isna().tolist() == [True, False]  # 不能借 mask 解除缺失值
+        assert F(a, mask=[False, True]).isna().tolist() == [True, True]
+        assert F(F(["1", "2"]), mask=[True, False]).mantissa.tolist() == [0, 2]
+
+    def test_invariants(self):
+        a = F([1, 2, 3], mask=[True, False, True])
+        assert a.mantissa.tolist() == [0, 2, 0]  # 缺失位置的尾数恒为 0
+        assert not a.mask.flags.writeable
+        with pytest.raises(ValueError):
+            a.mask[0] = False
+        got = a.isna()
+        got[0] = False  # isna 返回副本
+        assert a.isna()[0]
+        assert F([1, 2]).mask is None and F(None).mask.shape == ()
+        assert F._from_mantissa(np.array([5, 6]), 0, mask=[True, False]).mantissa.tolist() == [0, 6]
+
+
+class TestNAAccessors:
+    def test_isna_notna_and_aliases(self):
+        a = na([None, "1", None])
+        assert a.isna().tolist() == [True, False, True] and a.notna().tolist() == [False, True, False]
+        assert a.isnull().tolist() == a.isna().tolist() and a.notnull().tolist() == a.notna().tolist()
+        assert F(["1", "2"]).isna().tolist() == [False, False] and F(["1", "2"]).notna().tolist() == [True, True]
+        assert F("1").isna().shape == () and not F("1").isna()
+
+    def test_fillna(self):
+        a = na([None, "1.5", None])
+        filled = a.fillna(0)
+        assert filled.mask is None and (filled.mantissa.tolist(), filled.scale) == ([0, 15, 0], 1)
+        assert a.fillna(Decimal("0.25")).mantissa.tolist() == [25, 150, 25]  # 对齐到更高的 scale
+        assert a.fillna(F(["7", "8", "9"])).mantissa.tolist() == [70, 15, 90]  # 逐元素填充
+        b = F(["1", "2"])
+        assert b.fillna(0) is b
+        with pytest.raises(TypeError):
+            a.fillna("0")
+
+    def test_dropna(self):
+        a = na([None, "1.5", None, "-2"])
+        d = a.dropna()
+        assert d.mask is None and (d.mantissa.tolist(), d.scale) == ([15, -20], 1)
+        b = F(["1", "2"])
+        assert b.dropna() is b
+        assert na([None, None]).dropna().shape == (0,)
+        with pytest.raises(ValueError, match="1 维"):
+            na([[None, "1"]]).dropna()
+
+
+class TestNAArithmetic:
+    def test_propagation(self):
+        a, b = na([None, "1.5", "2"]), na(["1", None, "0.25"])
+        for result in (a + b, a - b, a * b, a.mul_round(b, scale=1), a / b, a.divide(b, scale=4)):
+            assert result.isna().tolist() == [True, True, False]
+        assert (a + b).mantissa.tolist() == [0, 0, 225] and ((a * b).mantissa.tolist(), (a * b).scale) == ([0, 0, 500],
+                                                                                                           3)
+        assert (-a).isna().tolist() == [True, False, False] and abs(a).mantissa.tolist() == [0, 15, 20]
+        assert (1 - a).isna().tolist() == [True, False, False] and (Decimal("2") * a).mantissa.tolist() == [0, 30, 40]
+
+    def test_broadcast(self):
+        got = F([["1"], ["2"]]) + na([None, "1"])
+        assert got.isna().tolist() == [[True, False], [True, False]] and got.mantissa.tolist() == [[0, 2], [0, 3]]
+        assert (F(None) + F(["1", "2"])).isna().tolist() == [True, True]
+        assert (F(["1", "2"]) * F(None)).isna().tolist() == [True, True]
+
+    def test_masked_positions_never_raise(self):
+        dens = F([0, 2], mask=[True, False])
+        assert (F([1, 4]) / dens).isna().tolist() == [True, False]
+        assert (F([1, 4]) / dens).mantissa.tolist() == [0, 2]
+        assert (F([1, 4]) % dens).isna().tolist() == [True, False]
+        with pytest.raises(ZeroDivisionError):
+            F([1, 4]) / F([None, 0])  # 有效位置的 0 照常报错
+        with pytest.raises(OverflowError):
+            raw([MAX, 1], 0) + na(["1", None])  # 有效位置越界照常报错
+        big = F._from_mantissa(np.array([MAX, MIN]), 0, mask=[True, False])  # 有效位置是 MIN
+        with pytest.raises(OverflowError):
+            -big
+        assert (-F._from_mantissa(np.array([MIN, 5]), 0, mask=[True, False])).mantissa.tolist() == [0, -5]
+
+    def test_slow_paths(self):
+        a = F._from_mantissa(np.array([10 ** 18, 7]), 0, mask=[False, True])
+        got = a.mul_round(raw([10 ** 3, 10 ** 3], 3), scale=0)  # 分块乘法路径
+        assert got.isna().tolist() == [False, True] and got.mantissa.tolist() == [10 ** 18, 0]
+        assert a.sum().mantissa == 10 ** 18 and a.mean().mantissa == 10 ** 18
+
+    def test_floordiv_mod_divmod(self):
+        a, b = na(["7", None, "-7"]), na(["2", "2", None])
+        q = a // b
+        assert isinstance(q, F) and q.isna().tolist() == [False, True, True] and q.mantissa.tolist() == [3, 0, 0]
+        assert (a % b).isna().tolist() == [False, True, True] and (a % b).mantissa.tolist() == [1, 0, 0]
+        q2, r2 = divmod(a, b)
+        assert q2.isna().tolist() == [False, True, True] and r2.isna().tolist() == [False, True, True]
+        assert (F(None) // F(2)).isna() and (F(7) // F(None)).isna()
+        q3 = F([[1, 2, 3], [4, 5, 6]]) // na(["1", None, "3"])  # 掩码随商广播
+        assert q3.isna().tolist() == [[False, True, False]] * 2 and q3.mantissa.tolist() == [[1, 0, 1], [4, 0, 2]]
+
+    def test_matmul(self):
+        a = na([[None, "1"], ["2", "3"]])
+        b = F([["1", "0"], ["0", "1"]])
+        got = a @ b
+        assert got.isna().tolist() == [[True, True], [False, False]] and got.mantissa.tolist() == [[0, 0], [2, 3]]
+        got = b @ na([["1", None], ["2", "3"]])
+        assert got.isna().tolist() == [[False, True], [False, True]]
+        assert (na([None, "1"]) @ F(["1", "1"])).isna() and not (F(["1", "1"]) @ F(["1", "1"])).isna()
+        assert (na([[None, "1"]]) @ F(["1", "1"])).isna().tolist() == [True]
+        assert a.matmul(b, scale=0, rounding="down").isna().tolist() == [[True, True], [False, False]]
+
+    def test_rescale_round_to_step_is_on_step(self):
+        a = na([None, "1.24", "1.25"])
+        assert a.rescale(4).isna().tolist() == [True, False, False] and a.rescale(4).mantissa.tolist() == [0, 12400,
+                                                                                                           12500]
+        assert a.rescale(1).mantissa.tolist() == [0, 12, 13]
+        r = a.round_to_step(Decimal("0.1"))
+        assert r.isna().tolist() == [True, False, False] and r.mantissa.tolist() == [0, 120, 130]
+        assert a.is_on_step(Decimal("0.01")).tolist() == [False, True, True]  # NA 不在任何网格上
+        assert F(["1.2", "1.3"]).round_to_step(F([0, Decimal("0.5")], mask=[True, False])).isna().tolist() == \
+               [True, False]
+        with pytest.raises(ValueError, match="正数"):
+            a.round_to_step(F(["0.1", "0", "0.1"]))
+
+
+class TestNAReductions:
+    def test_sum(self):
+        a = na([[None, "1.5"], ["2", None]])
+        assert a.sum() == F("3.5") and a.sum().mask is None
+        assert a.sum(axis=0).mantissa.tolist() == [20, 15]
+        assert na([None, None]).sum() == 0  # skipna：全为 NA 的切片和为 0
+        s = a.sum(axis=1, skipna=False)
+        assert s.isna().tolist() == [True, True]
+        assert na([[None, "1"], ["2", "3"]]).sum(axis=1, skipna=False, keepdims=True).isna().tolist() == [[True],
+                                                                                                          [False]]
+        assert np.sum(a) == F("3.5")
+
+    def test_mean(self):
+        a = na([[None, "1.5"], ["2", "4"]])
+        assert a.mean() == F("2.5")  # (1.5 + 2 + 4) / 3
+        assert a.mean(axis=0).mantissa.tolist() == [20, 28]  # [2, 2.75 → 2.8]
+        assert a.mean(axis=1, keepdims=True).mantissa.tolist() == [[15], [30]]
+        assert a.mean(axis=(0, 1), scale=3).mantissa.tolist() == 2500
+        assert a.mean(axis=1, skipna=False).isna().tolist() == [True, False]
+        assert na([None, None]).mean().isna()
+        assert na([[None, None], ["1", "2"]]).mean(axis=1).isna().tolist() == [True, False]
+        assert np.mean(a) == F("2.5")
+
+    def test_mean_random_against_fraction(self):
+        rng = random.Random(161)
+        for _ in range(500):
+            rows, cols = rng.randint(1, 4), rng.randint(1, 4)
+            vals = [[None if rng.random() < 0.3 else random_mantissa(rng) // 1000 for _ in range(cols)]
+                    for _ in range(rows)]
+            m = np.array([[0 if v is None else v for v in row] for row in vals], dtype=np.int64)
+            mask = np.array([[v is None for v in row] for row in vals])
+            a = F._from_mantissa(m, 2, mask=mask)
+            axis, mode, scale = rng.choice([None, 0, 1]), rng.choice(MODES), rng.randint(0, 4)
+            got = a.mean(axis=axis, scale=scale, rounding=mode)
+            lines = [[v for row in vals for v in row]] if axis is None else (
+                [list(col) for col in zip(*vals)] if axis == 0 else vals)
+            for i, line in enumerate(lines):
+                valid = [v for v in line if v is not None]
+                cell = got if axis is None else got[i]
+                if not valid:
+                    assert cell.isna()
+                else:
+                    want = ref_round(Fraction(sum(valid), len(valid)) * Fraction(10) ** (scale - 2), mode)
+                    assert not cell.isna() and int(cell.mantissa) == want, (vals, axis, mode, scale)
+
+
+class TestNACompare:
+    def test_missing_never_equal_or_ordered(self):
+        a, b = na([None, "1", "2"]), na(["1", None, "2"])
+        assert (a == b).tolist() == [False, False, True] and (a != b).tolist() == [True, True, False]
+        for op in (np.less, np.less_equal, np.greater, np.greater_equal):
+            assert a._compare(b, op).tolist() == [False, False, bool(op(2, 2))]
+        assert (a <= b).tolist() == [False, False, True] and (a > 0).tolist() == [False, True, True]
+        assert (na([None, None]) == na([None, None])).tolist() == [False, False]
+        scalar = F(None) == F(None)
+        assert isinstance(scalar, np.bool_) and not scalar and (F(None) != F(None))
+        assert (F([["1"], [None]]) == na([None, "1"])).tolist() == [[False, True], [False, False]]  # 广播
+
+    def test_array_equal(self):
+        a = na([None, "1"])
+        assert not np.array_equal(a, na([None, "1.0"]))
+        assert np.array_equal(a, na([None, "1.0"]), equal_nan=True)
+        assert not np.array_equal(a, F(["0", "1"]), equal_nan=True)  # 一边 NA、一边 0
+        assert not np.array_equal(a, na(["1", None]), equal_nan=True)
+        assert not np.array_equal(F("1"), object(), equal_nan=True)  # 不是数值：按 == 比较
+        assert np.array_equiv(na([[None, "1"]] * 2), a) is False
+
+
+class TestNAShapeAndExport:
+    def test_indexing_and_shape(self):
+        a = na([[None, "1"], ["2", None]])
+        assert a[0, 0].isna() and not a[0, 1].isna() and a[1].isna().tolist() == [False, True]
+        assert [x.isna().tolist() for x in a] == [[True, False], [False, True]]
+        assert a.T.isna().tolist() == [[True, False], [False, True]] == a.transpose().isna().tolist()
+        assert a.reshape(4).isna().tolist() == [True, False, False, True]
+        assert a.swapaxes(0, 1).isna().tolist() == [[True, False], [False, True]]
+        assert na([[None, "1"]]).squeeze().isna().tolist() == [True, False]
+        assert na([[None], ["1"]]).squeeze(axis=1).isna().tolist() == [True, False]
+
+    def test_swapaxes_squeeze_without_mask(self):
+        a = F([[["1", "2"]], [["3", "4"]]])  # 形状 (2, 1, 2)
+        assert a.swapaxes(0, 2).shape == (2, 1, 2) and a.swapaxes(0, 2).mantissa[:, 0, :].tolist() == [[1, 3], [2, 4]]
+        assert a.squeeze().shape == (2, 2) and a.squeeze(axis=1).mantissa.tolist() == [[1, 2], [3, 4]]
+        assert a.swapaxes(0, 2).mask is None and a.squeeze().mask is None
+        with pytest.raises(ValueError):
+            a.squeeze(axis=0)
+
+    def test_to_float_and_decimal(self):
+        a = na([None, "1.25"])
+        f = a.to_float()
+        assert np.isnan(f[0]) and f[1] == 1.25
+        assert np.isnan(F(None).to_float()) and isinstance(F(None).to_float(), float)
+        assert a.to_decimal().tolist() == [None, Decimal("1.25")] and F(None).to_decimal() is None
+        big = F._from_mantissa(np.array([2 ** 60, 0]), 30, mask=[False, True])  # 走逐个转换路径
+        assert big.to_float()[0] == 2 ** 60 / 10 ** 30 and np.isnan(big.to_float()[1])
+
+    def test_str_and_repr(self):
+        assert str(F(None)) == "<NA>" and repr(F(None, scale=2)) == "FixedArray(<NA>, scale=2)"
+        assert str(na([None, "1.5"])) == "[<NA>, 1.5]"
+        assert str(na([[None, "1"], ["2", None]])) == "[[<NA>, 1],\n [2, <NA>]]"
+
+    def test_pandas_and_polars(self):
+        pytest.importorskip("pandas")
+        a = na([None, "1.25"])
+        assert a.to_pandas().isna().tolist() == [True, False]
+        assert a.to_pandas(as_float=False).tolist() == [None, Decimal("1.25")]
+        pytest.importorskip("polars")
+        assert a.to_polars(as_float=False).null_count() == 1
+        assert a.to_polars(as_float=False).to_list()[1] == Decimal("1.25")
+        assert a.to_polars().to_list() == [None, 1.25] and a.to_polars().null_count() == 1  # 不是 NaN
+        assert F(None).to_polars().to_list() == [None] and F("1.5").to_polars().to_list() == [1.5]
+
+
+# ===========================================================================
+# 17. 缺陷回归测试（已修复）
 # ===========================================================================
 
 
@@ -2008,3 +2230,181 @@ class TestRegressions:
     def test_divide_min_by_minus_one_to_lower_scale(self):
         got = raw(MIN, 16).divide(F(-1), scale=8, rounding="up")
         assert int(got.mantissa) == 92233720369
+
+    # ---- 第二轮复核：构造 ----
+    @pytest.mark.parametrize("value", [[1, True], (True, 2.5), [[1, 2], [np.True_, 3]],
+                                       [np.array([True]), np.array([2])], [[1.5, False]]])
+    def test_bool_mixed_into_sequence_rejected(self, value):
+        with pytest.raises(TypeError, match="布尔"):
+            F(value)
+        with pytest.raises(TypeError, match="布尔"):
+            Money(value, "USD")
+
+    def test_float_with_huge_explicit_scale(self):
+        assert F(0.0, scale=400).scale == 400 and not F(0.0, scale=400).mantissa.any()
+        assert not F([0.0, -0.0], scale=10 ** 6).mantissa.any()
+        assert F([1e-320, 0.0], scale=330).mantissa.tolist() == [10 ** 10, 0]  # 次正规数走精确路径
+        assert F(np.array([2.5e-305, 1e-310]), scale=320).mantissa.tolist() == [25 * 10 ** 14, 10 ** 10]
+        for make in (lambda: F(1.5, scale=400), lambda: F([1.5], scale=400), lambda: F([1e-300], scale=330)):
+            with pytest.raises(OverflowError, match="超出 int64 范围"):
+                make()
+
+    def test_lose_precision(self):
+        assert not F("1.000")._lose_precision(2) and F("1.005")._lose_precision(2)
+        assert not F("1.5")._lose_precision(1) and not F("1.5")._lose_precision(3)
+        assert not raw([0, 0], 30)._lose_precision(2) and raw([0, 1], 30)._lose_precision(2)
+        assert raw([MIN], 18)._lose_precision(0) and not raw([-(10 ** 18)], 18)._lose_precision(0)
+        assert not F(["1.000", None])._lose_precision(2) and F([None, "1.005"])._lose_precision(2)  # NA 不算
+
+    # ---- 第二轮复核：比较 ----
+    def test_eq_with_unrepresentable_values_is_elementwise(self):
+        a = F(["1", "2"])
+        assert (a == np.array([1.0, np.nan])).tolist() == [True, False]
+        assert (a != np.array([1.0, np.nan])).tolist() == [False, True]
+        assert (a == np.array([np.inf, 2.0])).tolist() == [False, True]
+        assert (a == np.array([1.0, 1e300])).tolist() == [True, False]
+        assert (a == np.array([1.0, 1e-300])).tolist() == [True, False]  # 量级悬殊：退回逐个比较
+        assert (a == np.float32(np.nan)).tolist() == [False, False]
+        assert (a == 2 ** 70).tolist() == [False, False] and (a != 2 ** 70).tolist() == [True, True]
+        assert (a == [Decimal("NaN"), 2]).tolist() == [False, True]
+        assert (a == [10 ** 30, F("2.0")]).tolist() == [False, True]
+        assert (F([["1"], ["2"]]) == np.array([1.0, np.nan])).tolist() == [[True, False], [False, False]]  # 广播
+        scalar = F("1") == np.nan
+        assert isinstance(scalar, np.bool_) and not scalar
+        with pytest.raises(ValueError):
+            a == np.array([1.0, np.nan, 3.0])  # 形状不能广播是真错误
+        assert (a < np.array([3.0, np.nan])).tolist() == [True, False]  # NaN 是缺失值，大小比较为 False
+        for op in (lambda: a < np.array([1.0, np.inf]), lambda: a >= np.inf):
+            with pytest.raises(ValueError):
+                op()
+        with pytest.raises(OverflowError):
+            a > 2 ** 70
+
+    def test_compare_never_overflows_on_alignment(self):
+        assert not (raw(MAX, 0) == F("1.5")) and raw(MAX, 0) != F("0.1")
+        assert raw(MAX, 0) > F("0.1") and raw(MIN, 0) < raw(1, 40) and raw(1, 40) > raw(0, 0)
+        assert raw(-1, 40) < 0 and raw(-1, 40) > raw(-1, 39) and raw(0, 40) == 0
+        assert (raw([MAX, MIN], 0) >= F(["0.5", "-0.5"])).tolist() == [True, False]
+
+    def test_compare_random_against_fraction(self):
+        rng = random.Random(77)
+        ops = {"==": (np.equal, lambda x, y: x == y), "<": (np.less, lambda x, y: x < y),
+               "<=": (np.less_equal, lambda x, y: x <= y), ">": (np.greater, lambda x, y: x > y)}
+        for _ in range(3000):
+            a = raw(random_mantissa(rng), rng.randint(0, 40))
+            if rng.random() < 0.3:  # 相等的不同写法
+                k = rng.randint(0, 3)
+                b = raw(int(a.mantissa) * 10 ** k, a.scale + k) if fits(int(a.mantissa) * 10 ** k) else a
+            else:
+                b = raw(random_mantissa(rng), rng.randint(0, 40))
+            for name, (op, ref) in ops.items():
+                assert bool(a._compare_fixed_array(b, op)) == ref(value(a), value(b)), (name, a, b)
+
+    # ---- 第二轮复核：矩阵乘法 ----
+    def test_chunked_matmul_does_not_wrap(self):
+        for n in (8, 16, 32):
+            v = raw([MIN] * n, 0)
+            with pytest.raises(OverflowError):
+                v.matmul(v, rounding=None)
+        v = raw([MIN] * 8, 20)
+        assert v.matmul(v, scale=0) == 0  # 8·2^126 / 10^40 ≈ 0.068
+        assert int(v.matmul(v, scale=18).mantissa) == ref_round(Fraction(8 * 2 ** 126, 10 ** 22), "half_up")
+
+    def test_slow_path_rejects_scalar_operand(self):
+        with pytest.raises(ValueError):
+            raw([MAX], 0).matmul(raw(MAX, 0), rounding=None)
+
+    def test_matmul_rounds_without_intermediate_overflow(self):
+        a = F(["90000000.00"])
+        w = F(["1.123456789"])
+        assert a.matmul(w, scale=2) == a.mul_round(w, scale=2)
+        m = F([["90000000.00", "-90000000.00"], ["1", "2"]])
+        r = m.matmul(F([["1.123456789"], ["0.000000001"]]), scale=2, rounding="half_even")
+        assert r.mantissa.tolist() == [
+            [ref_round(Fraction(9 * 10 ** 9 * 1123456789 - 9 * 10 ** 9, 10 ** 9), "half_even")],
+            [ref_round(Fraction(100 * 1123456789 + 200, 10 ** 9), "half_even")]]
+
+    def test_matmul_round_random_against_fraction(self):
+        rng = random.Random(78)
+        for _ in range(1500):
+            n, k, m = rng.randint(1, 3), rng.randint(1, 5), rng.randint(1, 3)
+            sa, sb = rng.randint(0, 15), rng.randint(0, 15)
+            A = [[random_mantissa(rng) for _ in range(k)] for _ in range(n)]
+            B = [[random_mantissa(rng) for _ in range(m)] for _ in range(k)]
+            target, mode = rng.randint(0, sa + sb), rng.choice(MODES)
+            want = [[ref_round(Fraction(sum(A[i][t] * B[t][j] for t in range(k)), 10 ** (sa + sb - target)), mode)
+                     for j in range(m)] for i in range(n)]
+            if all(fits(x) for row in want for x in row):
+                got = raw(A, sa).matmul(raw(B, sb), scale=target, rounding=mode)
+                assert got.scale == target and got.mantissa.tolist() == want
+            else:
+                with pytest.raises(OverflowError):
+                    raw(A, sa).matmul(raw(B, sb), scale=target, rounding=mode)
+
+    def test_matmul_long_inner_dimension(self):
+        k = (1 << 19) + 3  # 超过一段，分段累加
+        a = np.full(k, MAX, dtype=np.int64)
+        b = np.where(np.arange(k) % 2 == 0, 1, -1).astype(np.int64)  # 正负对冲，结果放得下
+        assert int(raw(a, 0).matmul(raw(b, 0), rounding=None).mantissa) == MAX
+        a2 = np.stack([a, -a])
+        b2 = np.stack([b, b], axis=1)
+        assert raw(a2, 0).matmul(raw(b2, 0), rounding=None).mantissa.tolist() == [[MAX, MAX], [-MAX, -MAX]]
+        assert int(raw(a, 3).matmul(raw(b, 3), scale=0).mantissa) == ref_round(Fraction(MAX, 10 ** 6), "half_up")
+        with pytest.raises(OverflowError):
+            raw(a, 0).matmul(raw(np.ones(k, dtype=np.int64), 0), rounding=None)
+
+    # ---- 第二轮复核：NumPy 函数 ----
+    def test_numpy_function_whitelist(self):
+        a = F([["1", "2"], ["3", "4.5"]])
+        assert np.sum(a) == F("10.5") and np.all(np.mean(a, axis=0) == a.mean(axis=0))
+        assert np.all(np.transpose(a) == a.T)
+        assert (np.shape(a), np.ndim(a), np.size(a)) == ((2, 2), 2, 4)
+        for op in (lambda: np.reshape(a, 4), lambda: np.concatenate([a, a]), lambda: np.sort(a),
+                   lambda: np.isclose(a, a), lambda: np.allclose(a, a), lambda: np.where(a, 1, 0)):
+            with pytest.raises(TypeError, match="FixedArray 不支持 numpy."):
+                op()
+
+    def test_numpy_array_equal(self):
+        a = F(["1", "2"])
+        assert np.array_equal(a, a) is True and np.array_equal(a, F(["1.0", "2.00"]))
+        assert np.array_equal(a, [1, 2]) and np.array_equal([1, 2], a) and np.array_equal(a, np.array([1.0, 2.0]))
+        assert np.array_equal(a1=a, a2=[F("1"), 2], equal_nan=True)
+        assert not np.array_equal(a, F(["1", "3"])) and not np.array_equal(a, F([["1", "2"]]))
+        assert not np.array_equal(a, [1.0, np.nan], equal_nan=True) and not np.array_equal(a, F(["1", "2", "3"]))
+        assert not np.array_equal(a, Money(["1", "2"], "USD")) and not np.array_equal(a, "12")
+        assert np.array_equiv(a, F([["1", "2"], ["1", "2"]])) and np.array_equiv(F("1"), [1, 1])
+        assert not np.array_equiv(a, F(["1", "2", "3"])) and not np.array_equiv(a, [[1, 2], [1, 3]])
+
+    # ---- 缺失值（NA） ----
+    def test_zero_dim_nan_array(self):
+        assert F(np.array(np.nan)).isna() and F(np.array(np.nan), scale=2).isna()
+        assert F(np.array(np.nan), scale=2).scale == 2
+
+    def test_matmul_mask_counts_do_not_wrap(self):
+        for k in (255, 256, 512):  # 曾用 uint8 计数，满 256 回绕为 0
+            assert (F(np.full((1, k), np.nan)) @ F(np.ones(k, dtype=np.int64))).isna().tolist() == [True]
+            assert (F(np.ones(k, dtype=np.int64)) @ F(np.full((k, 1), np.nan))).isna().tolist() == [True]
+
+    def test_eq_unrepresentable_respects_own_mask(self):
+        assert (na([None, "1"]) == [0, 10 ** 30]).tolist() == [False, False]
+        assert (na([None, "1"]) != [0, 10 ** 30]).tolist() == [True, True]
+        assert (na([None, "1"]) == np.array([0.0, np.inf])).tolist() == [False, False]
+        assert not (F(None) == 2 ** 70) and (F(None) != 2 ** 70)
+
+    def test_bool_of_missing_value_raises(self):
+        for x in (F(None), na([None]), na([[None]])):
+            with pytest.raises(TypeError, match="缺失值"):
+                bool(x)
+        assert bool(F("1")) and not bool(F("0"))
+
+    def test_fillna_with_missing_value(self):
+        for value in (None, float("nan"), na([None, "2"])):
+            with pytest.raises(ValueError, match="不能是缺失值"):
+                na([None, "1"]).fillna(value)
+        assert na([None, "1"]).fillna(na(["5", None])).mantissa.tolist() == [5, 1]  # 只看需要填充的位置
+
+    def test_no_bitwise_invert_on_python_bool(self):
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            with pytest.raises(OverflowError, match="舍入后超出"):
+                raw(6456360425798343065, 0).divide(raw(7, 0), scale=1, rounding="up")  # 商为 MAX 走 object 路径

@@ -31,7 +31,8 @@ Moneta 自下而上分为四层，上层只依赖下层：
 └────────────────────────────────────────────────────────────────────┘
 ```
 
-- **数值内核**：[`FixedArray`](reference/fixed_array.md) 是全部精确运算的基础，它只认识“数”，不认识币种或单位。
+- **数值内核**：[`FixedArray`](reference/fixed_array.md)（配合底层的 [`_rounding`](reference/_rounding.md)
+  舍入裁决引擎与 [`_limbs`](reference/_limbs.md) Base $2^{21}$ 多精度分块算术内核）是全部精确运算的基础，它只认识“数”，不认识币种或单位。
 - **量纲层**：在 `FixedArray` 之上通过 [`UnitArray`](reference/unit_array.md) 附加单位与币种（[
   `Currency`](reference/currency.md)、[`CurrencyRegistry`](reference/currency.md#currencyregistry)），阻止不同量纲之间的非法运算。
 - **业务对象**：金额（[`Money`](reference/money.md)）、价格（[`Price`](reference/price.md)）、数量（[
@@ -97,16 +98,34 @@ FixedArray([1.95, 1.71, 3.33], scale=2)
 FixedArray(33.33, scale=2)
 ```
 
-**显式导出。**
+**显式导出与缺失值处理。**
 
 ```python
 >>> amount.to_float()
 array([ 59.97,  52.5 , 102.4 ])
 >>> amount.to_decimal()
 array([Decimal('59.97'), Decimal('52.50'), Decimal('102.40')], dtype=object)
+>>> with_na = FixedArray(["10.50", None, "20.25"])
+>>> with_na, with_na.sum(), with_na.fillna(0)
+(FixedArray([10.50, <NA>, 20.25], scale=2), FixedArray(30.75, scale=2), FixedArray([10.50, 0.00, 20.25], scale=2))
+```
+
+**带量纲的金额、价格与数量。** [`Money`](reference/money.md)、[`Price`](reference/price.md) 与 [
+`Quantity`](reference/quantity.md) 自动拦截跨币种或跨单位的非法运算，并在乘除法中自动完成量纲相消与守恒分配：
+
+```python
+>>> from moneta import Money, Price, Quantity
+>>> px = Price(["189.50", "200.00"], "USD", base_unit="share")
+>>> shares = Quantity([10, 5], unit="share")
+>>> total = (px * shares).sum()              # Price * Quantity -> Money (USD)
+>>> total
+Money(FixedArray(2895.00, scale=2), currency='USD')
+>>> total.allocate([1, 1, 1])                # 最大余数法守恒分配
+[Money(FixedArray(965.00, scale=2), currency='USD'), Money(FixedArray(965.00, scale=2), currency='USD'), Money(FixedArray(965.00, scale=2), currency='USD')]
 ```
 
 更多细节请参阅 [`FixedArray` 的 scale 传播规则](reference/fixed_array.md#scale-传播规则)、
+[缺失值掩码体系](reference/fixed_array.md#缺失值掩码体系null--na-mask)、
 [舍入模式](reference/fixed_array.md#roundingmode) 与 [NumPy 互操作机制](reference/fixed_array.md#numpy-互操作机制)。
 
 ## 示例约定

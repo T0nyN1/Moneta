@@ -7,30 +7,17 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from enum import Enum
 from fractions import Fraction
 from typing import Any, Callable, Optional, Tuple, Union
 
 import numpy as np
 
-_MIN = -(2 ** 63)
-_MAX = 2 ** 63 - 1
-_B = np.uint64(10 ** 9)
-_B_SQ = np.uint64(10 ** 18)
+from ._limbs import limbs_matmul, limbs_mul, limbs_round_div_pow10, limbs_sum, limbs_to_int64
+from ._rounding import RoundingMode, check_rounding, decide_bump, round_quotient
 
-
-class RoundingMode(str, Enum):
-    """金融与会计舍入规则枚举（继承自 str，完全兼容裸字符串与强类型枚举）。"""
-
-    HALF_UP = "half_up"  # 四舍五入（逢五远离零，金融零售常用）
-    HALF_EVEN = "half_even"  # 银行家舍入（四舍六入五成双，GAAP / IFRS 推荐，消除系统性统计偏差）
-    DOWN = "down"  # 向零截断（直接舍去尾数）
-    UP = "up"  # 远离零进位
-    FLOOR = "floor"  # 向负无穷截断
-    CEIL = "ceil"  # 向正无穷进位
-
-
-_ROUNDINGS = tuple(m.value for m in RoundingMode)
+# int64 边界常量
+_MAX = (1 << 63) - 1
+_MIN = -(1 << 63)
 
 
 class FixedArray:
@@ -47,17 +34,23 @@ class FixedArray:
         显式指定的小数位数。若为 None，标量按最短写法解析，float 数组逐位做往返检验。
     """
 
-    __slots__ = ("_mantissa", "_scale")
+    __slots__ = ("_mantissa", "_scale", "_mask")
     __array_ufunc__ = None  # 阻止 NumPy ufunc 静默运算，确保精度与类型安全
     __hash__ = None  # 可变/数组对象不可哈希
 
     # ---------- 构造与核心属性 ----------
 
-    def __init__(self, values: Any, scale: Optional[int] = None, ) -> None:
-        """构造 FixedArray。支持显式 scale、未知 scale 自动探测、及字符串/对象精确解析。"""
+    def __init__(self, values: Any, scale: Optional[int] = None, mask: Optional[Any] = None) -> None:
+        """构造 FixedArray。支持显式 scale、未知 scale 自动探测、字符串/对象解析及可选 mask 缺失值。"""
+        if values is None or (isinstance(values, (float, np.floating)) and np.isnan(values)):
+            s = 0 if scale is None else self._check_scale(scale)
+            self._set(np.int64(0), s, mask=np.array(True, dtype=bool))
+            return
+
         if isinstance(values, FixedArray):
             source = values if scale is None else values.rescale(scale)
-            self._set(source._mantissa, source._scale)  # 尾数只读，直接共享，不必复制
+            eff_mask = source._mask if mask is None else self._combine_masks(source._mask, np.asarray(mask, dtype=bool))
+            self._set(source._mantissa, source._scale, mask=eff_mask)
             return
         if scale is not None:
             scale = self._check_scale(scale)
@@ -70,6 +63,8 @@ class FixedArray:
             # 序列中含 FixedArray 元素：NumPy 会调用元素的 __array__ 而报错，先换成等值的 Decimal
             arr = np.asarray(self._expand_nested(values))
         kind = arr.dtype.kind
+        if kind in "iuf" and isinstance(values, (list, tuple)) and self._contains_bool(values):
+            raise TypeError("FixedArray 不支持布尔类型")  # np.asarray 会把序列里的 bool 悄悄转成 0/1
 
         if kind in "iu":
             # 路径 1：整数
@@ -77,33 +72,41 @@ class FixedArray:
             m = self._as_int64(arr)
             if s == 0 and isinstance(values, np.ndarray) and np.may_share_memory(m, values):
                 m = m.copy()  # 不与调用方的数组共享内存，保证构造后不可变
-            self._set(self._mul_pow10(m, s), s)
+            self._set(self._mul_pow10(m, s), s, mask=mask)
         elif kind == "f":
-            if not np.all(np.isfinite(arr)):
-                raise ValueError("FixedArray 不能包含 NaN 或无穷大")
-            top = float(np.abs(arr).max()) if arr.size else 0.0
-            if scale is not None and top * 10.0 ** scale >= 2.0 ** 63:
-                raise OverflowError(f"浮点数乘以 10^{scale} 后超出 int64 范围")
-            if arr.ndim == 0:
-                m, s = self._parse_float_scalar(arr[()])
-                m = self._as_int64(m)
+            if np.any(np.isinf(arr)):
+                raise ValueError("FixedArray 不能包含无穷大 (inf)")
+            nan_mask = np.isnan(arr)
+            has_nan = bool(np.any(nan_mask))
+            finite_arr = np.where(nan_mask, 0.0, arr) if has_nan else arr
+            top = float(np.abs(finite_arr).max()) if finite_arr.size else 0.0
+            if scale is not None and top and (scale > 400 or self._mul_pow10_float(top, scale) >= 2.0 ** 63):
+                raise OverflowError(f"浮点数乘以 10^{scale} 后超出 int64 范围")  # 非零 float 至少 5e-324
+            if finite_arr.ndim == 0:
+                if has_nan:
+                    m, s = np.int64(0), (0 if scale is None else scale)
+                else:
+                    m, s = self._parse_float_scalar(finite_arr[()])
+                    m = self._as_int64(m)
             else:
-                m, s = self._parse_float_array(arr, target_scale=scale)
+                m, s = self._parse_float_array(finite_arr, target_scale=scale)
             if scale is not None:
                 if s < scale:
                     m = self._mul_pow10(m, scale - s)
                 elif s > scale:
                     m = self._round_div_pow10(m, 0, 1, s - scale, mode="half_up")
                 s = scale
-            self._set(m, s)
+            eff_mask = nan_mask if mask is None else self._combine_masks(nan_mask, np.asarray(mask, dtype=bool))
+            self._set(m, s, mask=eff_mask)
         elif kind in "UO":
             # 路径 5：字符串、Decimal、Fraction 或混合对象（标量与数组同一条路径）
-            m, s = self._parse_text_array(arr)
+            m, s, text_mask = self._parse_text_array(arr)
             if scale is not None:
                 if s > scale:
                     raise ValueError(f"输入的小数位数 ({s}) 超出指定 scale ({scale})")
                 m, s = self._mul_pow10(m, scale - s), scale
-            self._set(m, s)
+            eff_mask = text_mask if mask is None else self._combine_masks(text_mask, np.asarray(mask, dtype=bool))
+            self._set(m, s, mask=eff_mask)
         else:
             raise TypeError(f"不支持从 {type(values).__name__} (dtype={arr.dtype}) 构造 FixedArray")
 
@@ -139,29 +142,109 @@ class FixedArray:
         """底层整数数据类型（int64）。"""
         return self._mantissa.dtype
 
+    @property
+    def mask(self) -> Optional[np.ndarray]:
+        """缺失值掩码矩阵（只读布尔视图，True 表示缺失值）。无缺失值时为 None。"""
+        return self._mask
+
+    def isna(self) -> np.ndarray:
+        """返回布尔矩阵，标记哪些位置是缺失值（Null / NA）。"""
+        if self._mask is None:
+            return np.zeros(self.shape, dtype=bool)
+        return self._mask.copy()
+
+    isnull = isna
+
+    def notna(self) -> np.ndarray:
+        """返回布尔矩阵，标记哪些位置是有效数值。"""
+        return ~self.isna()
+
+    notnull = notna
+
+    def fillna(self, value: Any) -> "FixedArray":
+        """用指定数值填充缺失位置，返回新的 FixedArray。填充值在需要填充的位置上不能是缺失值。"""
+        if self._mask is None or not np.any(self._mask):
+            return self
+        val_fa = self._coerce(value)
+        if val_fa._mask is not None and np.any(np.broadcast_to(val_fa._mask, self.shape) & self._mask):
+            raise ValueError("fillna 的填充值不能是缺失值")
+        val_aligned, self_aligned = self._align_scales(val_fa, self)
+        new_m = np.where(self._mask, val_aligned._mantissa, self_aligned._mantissa)
+        return self._from_mantissa(new_m, self_aligned._scale, mask=None)
+
+    def dropna(self) -> "FixedArray":
+        """丢弃缺失值（仅限 1 维向量）。"""
+        if self.ndim != 1:
+            raise ValueError("dropna() 仅支持 1 维 FixedArray")
+        if self._mask is None:
+            return self
+        valid = ~self._mask
+        return self._from_mantissa(self._mantissa[valid], self._scale, mask=None)
+
     # ---------- 构造收口与类型转换（私有） ----------
 
-    def _set(self, mantissa: Any, scale: int) -> None:
-        """收口：所有构造路径最后都经过这里，是唯一给 _mantissa、_scale 赋值的地方。
+    def _set(self, mantissa: Any, scale: int, mask: Optional[Any] = None) -> None:
+        """收口：所有构造路径最后都经过这里，是唯一给 _mantissa、_scale、_mask 赋值的地方。
 
-        尾数统一转成 int64 数组（0 维运算结果会退化成 NumPy 标量，这里包回数组；
-        float、object 报 TypeError；超出 int64 报 OverflowError），取视图后设为只读——
-        只锁视图，不改动调用方传入的数组。scale 由调用方保证合法。
+        尾数统一转成 int64 数组，取视图后设为只读。
+        若 mask 存在且包含 True，存储只读布尔掩码，并将缺失位置的尾数强制重置为 0；
+        若无缺失值，_mask 保持为 None。
         """
         view = self._as_int64(mantissa).view()
         view.flags.writeable = False
         self._mantissa = view
         self._scale = int(scale)
+        if mask is not None:
+            m_arr = np.asarray(mask, dtype=bool)
+            if np.any(m_arr):
+                if m_arr.shape != view.shape:
+                    m_arr = np.broadcast_to(m_arr, view.shape)
+                m_view = m_arr.copy().view()
+                m_view.flags.writeable = False
+                self._mask = m_view
+                if np.any(view[m_view] != 0):
+                    unlocked = view.copy()
+                    unlocked[m_view] = 0
+                    unlocked.flags.writeable = False
+                    self._mantissa = unlocked
+                return
+        self._mask = None
 
     @classmethod
-    def _from_mantissa(cls, mantissa: Any, scale: int) -> "FixedArray":
-        """直接使用已有的整数尾数矩阵与 scale 构造（内部零拷贝快速路径）。
+    def _from_mantissa(cls, mantissa: Any, scale: int, mask: Optional[Any] = None) -> "FixedArray":
+        """直接使用已有的整数尾数矩阵、scale 与可选 mask 构造（内部零拷贝快速路径）。
 
         int64 数组不复制：调用方之后不应再修改它。
         """
         obj = cls.__new__(cls)
-        obj._set(mantissa, scale)
+        obj._set(mantissa, scale, mask=mask)
         return obj
+
+    @staticmethod
+    def _combine_masks(m1: Optional[np.ndarray], m2: Optional[np.ndarray]) -> Optional[np.ndarray]:
+        """合并两个掩码（True 表示缺失）：只要任一方缺失，结果即缺失。"""
+        if m1 is None and m2 is None:
+            return None
+        if m1 is None:
+            return m2.copy() if hasattr(m2, "ndim") and m2.ndim else np.asarray(m2).copy()
+        if m2 is None:
+            return m1.copy() if hasattr(m1, "ndim") and m1.ndim else np.asarray(m1).copy()
+        res = m1 | m2
+        if not np.any(res):
+            return None
+        return res
+
+    @staticmethod
+    def _matmul_mask(m1: Optional[np.ndarray], m2: Optional[np.ndarray],
+                     s1: Tuple[int, ...], s2: Tuple[int, ...]) -> Optional[np.ndarray]:
+        """计算矩阵乘法结果的掩码：只要参与内积的点乘中存在缺失值，结果对应单元格即为缺失值。"""
+        if m1 is None and m2 is None:
+            return None
+        # bool 矩阵乘法即「内积中任一项为 True」，不存在计数回绕
+        u1 = np.zeros(s1, dtype=bool) if m1 is None else np.broadcast_to(m1, s1)
+        u2 = np.zeros(s2, dtype=bool) if m2 is None else np.broadcast_to(m2, s2)
+        res = np.matmul(u1, np.ones(s2, dtype=bool)) | np.matmul(np.ones(s1, dtype=bool), u2)
+        return res if np.any(res) else None
 
     @staticmethod
     def _is_numeric_operand(val: Any) -> bool:
@@ -171,6 +254,8 @@ class FixedArray:
         """
         if isinstance(val, (bool, np.bool_)):
             return False
+        if val is None:
+            return True
         if isinstance(val, (FixedArray, int, np.integer, float, np.floating, Decimal, Fraction)):
             return True
         if isinstance(val, np.ndarray):
@@ -200,11 +285,23 @@ class FixedArray:
         """
         if isinstance(other, FixedArray):
             return other
+        if other is None:
+            return cls(None)
         if not cls._is_numeric_operand(other):
             if strict:
                 raise TypeError(f"FixedArray 只能与数值类型运算、比较或对齐，收到 {type(other).__name__}")
             return None
         return cls(other)
+
+    def _lose_precision(self, target_scale: int) -> bool:
+        """降到 target_scale 位小数是否会改变数值：多出的小数位上有非零数字才算，末尾的 0 不算。"""
+        k = self._scale - target_scale
+        if k <= 0:
+            return False
+        valid = True if self._mask is None else (~self._mask)
+        if k > 18:  # |尾数| < 10^19 ≤ 10^k：只有 0 能被整除
+            return bool(np.any((self._mantissa != 0) & valid))
+        return bool(np.any((self._mantissa % (10 ** k) != 0) & valid))
 
     @staticmethod
     def _check_scale(scale: Any) -> int:
@@ -287,6 +384,34 @@ class FixedArray:
         """
         # trim="-" 去掉末尾的 ".0"：1.0 → "1"，scale 为 0，与数组路径的往返检验一致
         return cls._parse_decimal_str(np.format_float_positional(val, unique=True, trim="-"))
+
+    @staticmethod
+    def _is_missing(val: Any) -> bool:
+        """单个元素是否为缺失值：None、float NaN、Decimal NaN、文本 NaN（如 "nan"）、pandas.NA。"""
+        if val is None:
+            return True
+        if isinstance(val, (float, np.floating)):
+            return bool(np.isnan(val))
+        if isinstance(val, Decimal):
+            return val.is_nan()
+        if isinstance(val, (str, np.str_)):
+            if "n" not in val and "N" not in val:  # 绝大多数数字文本不含 n，省去一次 Decimal 解析
+                return False
+            try:
+                return Decimal(val.strip()).is_nan()
+            except Exception:
+                return False  # 无法解析的文本交给解析函数报错
+        return type(val).__name__ == "NAType"
+
+    @staticmethod
+    def _contains_bool(values: Any) -> bool:
+        """list / tuple（可嵌套）中是否混有 bool 或 bool 数组。"""
+        for v in values:
+            if isinstance(v, (bool, np.bool_)) or (isinstance(v, np.ndarray) and v.dtype.kind == "b"):
+                return True
+            if isinstance(v, (list, tuple)) and FixedArray._contains_bool(v):
+                return True
+        return False
 
     @classmethod
     def _expand_nested(cls, values: Any) -> Any:
@@ -424,7 +549,7 @@ class FixedArray:
         贴近 k + 1/2、|z| ≥ 2^51 或 x 为次正规数（ulp 不再受 |x|·eps 约束）的少数元素，
         逐个解析最短写法后用整数精确舍入。
         """
-        z = values.astype(np.float64, copy=False) * 10.0 ** scale
+        z = cls._mul_pow10_float(values.astype(np.float64, copy=False), scale)
         floor = np.floor(z)
         frac = z - floor  # |z| < 2^52 时精确
         info = np.finfo(values.dtype)
@@ -450,58 +575,71 @@ class FixedArray:
         return out
 
     @classmethod
-    def _parse_text_array(cls, arr: np.ndarray) -> Tuple[np.ndarray, int]:
-        """文本、Decimal、Fraction 或混合对象数组（含 0 维）→ (对齐后的尾数, scale)。"""
+    def _parse_text_array(cls, arr: np.ndarray) -> Tuple[np.ndarray, int, Optional[np.ndarray]]:
+        """文本、Decimal、Fraction 或混合对象数组（含 0 维）→ (对齐后的尾数, scale, mask)。"""
         if arr.ndim == 0:  # 标量直接解析，省去去重的开销
-            m, scale = cls._parse_object_element(arr[()])
-            return cls._as_int64(m), scale
+            val = arr[()]
+            if cls._is_missing(val):
+                return cls._as_int64(0), 0, np.array(True, dtype=bool)
+            m, scale = cls._parse_object_element(val)
+            return cls._as_int64(m), scale, None
         flat = arr.ravel()
+        null_mask = None
         if arr.dtype.kind == "U":
-            # 字符串可排序：先去重，只解析不同的取值
+            # 字符串可排序：先去重，只解析不同的取值；文本 NaN 是缺失值
             distinct, inverse = np.unique(flat, return_inverse=True)
-            parsed = [cls._parse_decimal_str(str(v)) for v in distinct]
+            missing = np.array([cls._is_missing(str(v)) for v in distinct], dtype=bool)
+            parsed = [(0, 0) if miss else cls._parse_decimal_str(str(v)) for v, miss in zip(distinct, missing)]
+            if missing.any():
+                null_mask = missing[inverse].reshape(arr.shape)
         else:
-            # 对象数组可能混合类型、无法排序：按 (类型, 文本) 去重。不能按值去重，
-            # 否则 Decimal("1.1") 与 Decimal("1.100") 相等，谁在前就用谁的小数位数
+            is_null = np.array([cls._is_missing(v) for v in flat], dtype=bool)
+            if np.any(is_null):
+                null_mask = is_null.reshape(arr.shape)
             index = {}
             parsed = []
             inverse = np.empty(flat.size, dtype=np.intp)
             for i, val in enumerate(flat):
-                key = (type(val).__name__, str(val))
-                j = index.get(key)
-                if j is None:
-                    j = index[key] = len(parsed)
-                    parsed.append(cls._parse_object_element(val))
-                inverse[i] = j
+                if is_null[i]:
+                    key = ("NoneType", "None")
+                    j = index.get(key)
+                    if j is None:
+                        j = index[key] = len(parsed)
+                        parsed.append((0, 0))
+                    inverse[i] = j
+                else:
+                    key = (type(val).__name__, str(val))
+                    j = index.get(key)
+                    if j is None:
+                        j = index[key] = len(parsed)
+                        parsed.append(cls._parse_object_element(val))
+                    inverse[i] = j
         scale = max((s for _, s in parsed), default=0)
         aligned = []
         for m, s in parsed:
             if m and (scale - s > 18 or not (_MIN <= m * 10 ** (scale - s) <= _MAX)):  # 先判断位数，避免巨大的幂
                 raise OverflowError(f"输入对齐到 {scale} 位小数后超出 int64 范围")
             aligned.append(m * 10 ** (scale - s) if m else 0)
-        return np.array(aligned, dtype=np.int64)[inverse].reshape(arr.shape), scale
+        res_m = np.array(aligned, dtype=np.int64)[inverse].reshape(arr.shape)
+        if null_mask is not None:
+            res_m[null_mask] = 0
+        return res_m, scale, null_mask
 
     # ---------- 底层数学与防溢出舍入引擎（私有） ----------
 
     @staticmethod
-    def _check_rounding(mode: Union[RoundingMode, str]) -> str:
-        if isinstance(mode, RoundingMode):
-            return mode.value
-        if mode not in _ROUNDINGS:
-            raise ValueError(f"rounding 只能是 {_ROUNDINGS} 之一，收到 {mode!r}")
-        return str(mode)
-
-    @staticmethod
-    def _check_division(m: np.ndarray, d: np.ndarray) -> None:
-        """除数不能含 0；-2**63 除以 -1 的商超出 int64。"""
-        if np.any(d == 0):
+    def _check_division(m: np.ndarray, d: np.ndarray, mask: Optional[np.ndarray] = None) -> None:
+        """除数不能含 0；-2**63 除以 -1 的商超出 int64。跳过被 mask 标记为缺失的位置。"""
+        valid_zero = (d == 0) if mask is None else ((d == 0) & (~mask))
+        if np.any(valid_zero):
             raise ZeroDivisionError("除数包含 0")
-        if np.any((d == -1) & (m == _MIN)):
+        valid_overflow = ((d == -1) & (m == _MIN)) if mask is None else (((d == -1) & (m == _MIN)) & (~mask))
+        if np.any(valid_overflow):
             raise OverflowError("-2**63 除以 -1 超出 int64 范围")
 
     @staticmethod
     def _max_abs(x: np.ndarray) -> int:
-        """绝对值的最大值（Python int，-2**63 也不溢出）；空数组为 0。"""
+        """绝对值的最大值（Python int，-2**63 也不溢出）；空数组安全返回 0。"""
         return max(-int(x.min()), int(x.max())) if x.size else 0
 
     @staticmethod
@@ -517,98 +655,15 @@ class FixedArray:
         return x * 10 ** k
 
     @staticmethod
-    def _decide_bump(mode: str, *, is_negative: Any, odd_q: Any, has_fraction: Any, over_half: Any, exact_half: Any,
-                     floor_base: bool = False, ) -> Any:
-        """统一收口的舍入进位裁决函数。
-
-        根据截断状态和半数关系，为 6 大舍入模式（half_up, half_even, down, up, floor, ceil）
-        统一裁决是否需要对商基准值进位（bump + 1）。
-
-        Parameters
-        ----------
-        mode : str
-            舍入模式名称，必须已通过 _check_rounding 校验。
-        is_negative : bool or array_like of bool
-            数值是否为负。
-        odd_q : bool or array_like of bool
-            商（基准整数）是否为奇数。
-        has_fraction : bool or array_like of bool
-            是否存在非零小数部分。
-        over_half : bool or array_like of bool
-            小数部分是否严格大于 0.5。
-        exact_half : bool or array_like of bool
-            小数部分是否恰好等于 0.5。
-        floor_base : bool, default False
-            基准坐标系：
-            - False (Truncation Base): 商 q 是向零截断的绝对值 (|q| >= 0)，bump 作用于 |q|。
-              返回 uint64(0) 或 uint64(1)。
-            - True (Floor Base): 商 q 是向下取整的带符号数 (q = floor(m/d))，bump 作用于 q。
-              返回 bool 或 bool 数组。
-        """
-        if floor_base:
-            if mode == "floor":
-                return False
-            elif mode == "ceil":
-                return has_fraction
-            elif mode == "down":
-                return has_fraction & is_negative
-            elif mode == "up":
-                return has_fraction & (~is_negative)
-            elif mode == "half_even":
-                return np.where(over_half, True, np.where(exact_half, odd_q, False))
-            elif mode == "half_up":
-                return np.where(is_negative, over_half, over_half | exact_half)
-            else:
-                raise ValueError(f"rounding 只能是 {_ROUNDINGS} 之一，收到 {mode!r}")
-        else:
-            if mode == "down":
-                return np.uint64(0)
-            elif mode == "up":
-                return np.where(has_fraction, np.uint64(1), np.uint64(0))
-            elif mode == "floor":
-                return np.where(is_negative & has_fraction, np.uint64(1), np.uint64(0))
-            elif mode == "ceil":
-                return np.where((~is_negative) & has_fraction, np.uint64(1), np.uint64(0))
-            elif mode == "half_even":
-                return np.where(over_half, np.uint64(1), np.where(exact_half & odd_q, np.uint64(1), np.uint64(0)))
-            elif mode == "half_up":
-                return np.where(over_half | exact_half, np.uint64(1), np.uint64(0))
-            else:
-                raise ValueError(f"rounding 只能是 {_ROUNDINGS} 之一，收到 {mode!r}")
-
-    @staticmethod
-    def _round_quotient(q: np.ndarray, r: np.ndarray, d: np.ndarray, mode: str) -> np.ndarray:
-        """由向下取整的商 q 与余数 r（m = q·d + r，r 与 d 同号，|r| < |d|）按 mode 取整。
-
-        真实值为 q + r/d，r/d ∈ [0, 1)。判断 r/d 与 1/2 的大小时比较 r 与 d - r：二者同号
-        且 |d - r| ≤ |d|，不会溢出。调用方保证 q + 1 不溢出。
-        """
-        if mode == "floor":
-            return q
-        has_fraction = (r != 0)
-        is_negative = (q < 0)
-        if mode in ("half_even", "half_up"):
-            over_half = np.where(d > 0, r > d - r, r < d - r)
-            exact_half = (r == d - r)
-            odd_q = (q % 2 != 0)
-        else:
-            over_half = exact_half = odd_q = False
-        bump = FixedArray._decide_bump(
-            mode,
-            is_negative=is_negative,
-            odd_q=odd_q,
-            has_fraction=has_fraction,
-            over_half=over_half,
-            exact_half=exact_half,
-            floor_base=True,
-        )
-        return q + bump
+    def _mul_pow10_float(x: Any, scale: int) -> Any:
+        """x·10^scale（float），scale 超过 300 时分两步乘，避免 10.0 ** scale 本身溢出。"""
+        return x * 10.0 ** min(scale, 300) * 10.0 ** max(scale - 300, 0)
 
     @staticmethod
     def _divmod_round(m: Any, d: Any, mode: str = "half_up") -> Any:
         """整数带余除法舍入：round(m / d)，全程 int64，结果精确。
 
-        先做向下取整的带余除法 ``m = q·d + r``，再由 ``_round_quotient`` 决定 q 是否加 1。
+        先做向下取整的带余除法 ``m = q·d + r``，再由 ``round_quotient`` 决定 q 是否加 1。
 
         Parameters
         ----------
@@ -632,12 +687,12 @@ class FixedArray:
         OverflowError
             输入超出 int64 范围，或 -2**63 除以 -1。
         """
-        FixedArray._check_rounding(mode)
+        check_rounding(mode)
         scalar = isinstance(m, (int, np.integer)) and isinstance(d, (int, np.integer))
         m, d = FixedArray._as_int64(m), FixedArray._as_int64(d)
         FixedArray._check_division(m, d)
         q, r = np.divmod(m, d)
-        q = FixedArray._round_quotient(q, r, d, mode)
+        q = round_quotient(q, r, d, mode)
         return int(q) if scalar else np.asarray(q)
 
     @staticmethod
@@ -712,28 +767,12 @@ class FixedArray:
             k -= c
 
         # 终局舍入
-        if mode == "floor":
-            return q
-        has_fraction = (r != 0)
-        is_negative = (q < 0)
-        if mode in ("half_even", "half_up"):
-            over_half = np.where(d > 0, r > d - r, r < d - r)
-            exact_half = (r == d - r)
-            odd_q = (q % 2 != 0)
-        else:
-            over_half = exact_half = odd_q = False
-        bump = FixedArray._decide_bump(
-            mode,
-            is_negative=is_negative,
-            odd_q=odd_q,
-            has_fraction=has_fraction,
-            over_half=over_half,
-            exact_half=exact_half,
-            floor_base=True,
-        )
-        if np.any((q == _MAX) & bump):
-            raise OverflowError("除法舍入后超出 int64 范围")
-        return q + bump
+        if np.any(q == _MAX):
+            rounded = round_quotient(q.astype(object), r, d, mode)
+            if np.any(rounded > _MAX):
+                raise OverflowError("除法舍入后超出 int64 范围")
+            return np.asarray(rounded, dtype=np.int64)
+        return round_quotient(q, r, d, mode)
 
     @staticmethod
     def _round_div_pow10(q: Any, r: Any, d: Any, k: int, mode: str) -> Any:
@@ -741,7 +780,7 @@ class FixedArray:
         支持标量与数组，全程原生 int64/uint64 整数运算。
         """
         if k == 0:
-            return FixedArray._round_quotient(q, r, d, mode)
+            return round_quotient(q, r, d, mode)
 
         q = np.asarray(q, dtype=np.int64)
         r = np.asarray(r, dtype=np.int64)
@@ -773,7 +812,7 @@ class FixedArray:
                 over_half = q_neg
                 exact_half = np.zeros_like(q_neg, dtype=bool)
 
-        bump = FixedArray._decide_bump(
+        bump = decide_bump(
             mode,
             is_negative=q_k < 0,
             odd_q=q_k % 2 != 0,
@@ -785,261 +824,12 @@ class FixedArray:
         return q_k + bump
 
     @staticmethod
-    def _chunked_mul_round(a: Any, b: Any, shift: int, mode: str = "half_up", ) -> np.ndarray:
-        """十进制 Base 10^9 分块长乘法与舍入，全程基于纯原生 int64/uint64 整数运算。
-
-        计算 round((a * b) / 10^shift, mode=mode)。
-        单块相乘 (10^9 - 1)^2 < 10^18，仅占 int64 上限的 10.8%，在 int64 内部绝对不溢出。
-        当且仅当最终舍入结果超出 int64 范围时才抛出 OverflowError。
-        """
-        a_arr = np.asarray(a, dtype=np.int64)
-        b_arr = np.asarray(b, dtype=np.int64)
-        a_arr, b_arr = np.broadcast_arrays(a_arr, b_arr)
-
-        sign = np.where((a_arr < 0) ^ (b_arr < 0), -1, 1)
-
-        # 安全获取 uint64 绝对值幅度（正确处理 -2**63 无负号溢出）
-        with np.errstate(over="ignore"):
-            ua = a_arr.view(np.uint64)
-            ub = b_arr.view(np.uint64)
-            mag_a = np.where(a_arr < 0, (~ua) + np.uint64(1), ua)
-            mag_b = np.where(b_arr < 0, (~ub) + np.uint64(1), ub)
-
-        # 拆分为 Base 10^9 的 3 个数字块
-        a0 = mag_a % _B
-        a1 = (mag_a // _B) % _B
-        a2 = mag_a // _B_SQ
-
-        b0 = mag_b % _B
-        b1 = (mag_b // _B) % _B
-        b2 = mag_b // _B_SQ
-
-        # 卷积项
-        c0 = a0 * b0
-        c1 = a0 * b1 + a1 * b0
-        c2 = a0 * b2 + a1 * b1 + a2 * b0
-        c3 = a1 * b2 + a2 * b1
-        c4 = a2 * b2
-
-        # 进位传递
-        d0 = c0 % _B
-        c1 = c1 + c0 // _B
-        d1 = c1 % _B
-        c2 = c2 + c1 // _B
-        d2 = c2 % _B
-        c3 = c3 + c2 // _B
-        d3 = c3 % _B
-        c4 = c4 + c3 // _B
-        d4 = c4 % _B
-        d5 = c4 // _B
-
-        digits = [d0, d1, d2, d3, d4, d5]
-
-        if shift >= 0:
-            k = shift
-            if k == 0:
-                for x in digits[3:]:
-                    if np.any(x > 0):
-                        raise OverflowError("乘法结果超出 int64 范围")
-                if np.any(digits[2] > 9):
-                    raise OverflowError("乘法结果超出 int64 范围")
-                val = digits[2] * _B_SQ + digits[1] * _B + digits[0]
-                overflow = (sign > 0) & (val > np.uint64(_MAX)) | (sign < 0) & (val > np.uint64(-_MIN))
-                if np.any(overflow):
-                    raise OverflowError("乘法结果超出 int64 范围")
-                with np.errstate(over="ignore"):
-                    out = np.where(sign > 0, val, (~val) + np.uint64(1))
-                return np.asarray(out).view(np.int64)
-
-            s = k // 9
-            r = k % 9
-
-            if s >= len(digits):
-                e = [np.zeros_like(mag_a)]
-            else:
-                e = digits[s:]
-
-            pow10_r = np.uint64(10 ** r)
-            rem = np.zeros_like(mag_a)
-            q_blocks = [np.zeros_like(mag_a) for _ in range(len(e))]
-            for j in range(len(e) - 1, -1, -1):
-                val = rem * _B + e[j]
-                q_blocks[j] = val // pow10_r
-                rem = val % pow10_r
-
-            for j in range(3, len(q_blocks)):
-                if np.any(q_blocks[j] > 0):
-                    raise OverflowError("融合乘法舍入结果超出 int64 范围")
-            q0 = q_blocks[0] if len(q_blocks) > 0 else np.zeros_like(mag_a)
-            q1 = q_blocks[1] if len(q_blocks) > 1 else np.zeros_like(mag_a)
-            q2 = q_blocks[2] if len(q_blocks) > 2 else np.zeros_like(mag_a)
-            if np.any(q2 > 9):
-                raise OverflowError("融合乘法舍入结果超出 int64 范围")
-            q = q2 * _B_SQ + q1 * _B + q0
-
-            has_fraction = rem > 0
-            for d in digits[:s]:
-                has_fraction = has_fraction | (d > 0)
-
-            if r > 0:
-                first_dropped = (rem // np.uint64(10 ** (r - 1))) % np.uint64(10)
-                has_lower = (rem % np.uint64(10 ** (r - 1))) > 0 if r > 1 else np.zeros_like(mag_a, dtype=bool)
-                for d in digits[:s]:
-                    has_lower = has_lower | (d > 0)
-            else:
-                if s - 1 < len(digits):
-                    first_dropped = (digits[s - 1] // np.uint64(10 ** 8)) % np.uint64(10)
-                    has_lower = (digits[s - 1] % np.uint64(10 ** 8)) > 0
-                    for d in digits[:s - 1]:
-                        has_lower = has_lower | (d > 0)
-                else:
-                    first_dropped = np.zeros_like(mag_a)
-                    has_lower = np.zeros_like(mag_a, dtype=bool)
-                    for d in digits:
-                        has_lower = has_lower | (d > 0)
-
-            if mode in ("half_even", "half_up"):
-                over_half = (first_dropped > 5) | ((first_dropped == 5) & has_lower)
-                exact_half = (first_dropped == 5) & (~has_lower)
-                odd_q = (q % np.uint64(2) != 0)
-            else:
-                over_half = exact_half = odd_q = False
-
-            bump = FixedArray._decide_bump(
-                mode,
-                is_negative=(sign < 0),
-                odd_q=odd_q,
-                has_fraction=has_fraction,
-                over_half=over_half,
-                exact_half=exact_half,
-                floor_base=False,
-            )
-
-            final_abs = q + bump
-            overflow = (sign > 0) & (final_abs > np.uint64(_MAX)) | (sign < 0) & (final_abs > np.uint64(-_MIN))
-            if np.any(overflow):
-                raise OverflowError("融合乘法舍入结果超出 int64 范围")
-            with np.errstate(over="ignore"):
-                out = np.where(sign > 0, final_abs, (~final_abs) + np.uint64(1))
-            return np.asarray(out).view(np.int64)
-        else:
-            # shift < 0, 乘以 10**(-shift)
-            k = -shift
-            for x in digits[3:]:
-                if np.any(x > 0):
-                    raise OverflowError("乘法结果超出 int64 范围")
-            if np.any(digits[2] > 9):
-                raise OverflowError("乘法结果超出 int64 范围")
-            val = digits[2] * _B_SQ + digits[1] * _B + digits[0]
-            if k > 18:
-                if np.any(val > 0):
-                    raise OverflowError(f"乘法结果乘以 10^{k} 超出 int64 范围")
-                return np.zeros_like(a_arr, dtype=np.int64)
-            pow10_k = np.uint64(10 ** k)
-            limit = np.where(sign > 0, np.uint64(_MAX), np.uint64(-_MIN)) // pow10_k
-            if np.any(val > limit):
-                raise OverflowError(f"乘法结果乘以 10^{k} 后超出 int64 范围")
-            val = val * pow10_k
-            with np.errstate(over="ignore"):
-                out = np.where(sign > 0, val, (~val) + np.uint64(1))
-            return np.asarray(out).view(np.int64)
-
-    @staticmethod
-    def _chunked_sum(arr: np.ndarray, axis: Any = None, keepdims: bool = False) -> np.ndarray:
-        """十进制 Base 10^9 分块精确求和，全程纯 int64 运算，消除假阳性误报。
-
-        将输入数组分解为 3 个 Base 10^9 的数字块（r0, r1 < 10^9, r2 in [-10, 9]）。
-        各块沿轴求和单项不超过 10^9 * N，在 N <= 9*10^9 内单块绝对不溢出 int64。
-        最后通过两次进位折叠判定并重建结果，全程不升级为 Python 任意精度大整数。
-        """
-        b_base = np.int64(10 ** 9)
-        b_sq = np.int64(10 ** 18)
-        q1, r0 = np.divmod(arr, b_base)
-        r2, r1 = np.divmod(q1, b_base)
-
-        s0 = r0.sum(axis=axis, keepdims=keepdims)
-        s1 = r1.sum(axis=axis, keepdims=keepdims)
-        s2 = r2.sum(axis=axis, keepdims=keepdims)
-
-        c0, d0 = np.divmod(s0, b_base)
-        s1_total = s1 + c0
-        c1, d1 = np.divmod(s1_total, b_base)
-        s2_total = s2 + c1
-
-        overflow = (s2_total > 9) | (s2_total < -10)
-        over_max = (s2_total == 9) & ((d1 > 223372036) | ((d1 == 223372036) & (d0 > 854775807)))
-        under_min = (s2_total == -10) & ((d1 < 776627963) | ((d1 == 776627963) & (d0 < 145224192)))
-        overflow = overflow | over_max | under_min
-        if np.any(overflow):
-            raise OverflowError("求和结果超出 int64 范围")
-
-        with np.errstate(over="ignore"):
-            low_part = d1 * b_base + d0
-            res = np.where(
-                s2_total < 0,
-                (s2_total + 1) * b_sq + (low_part - b_sq),
-                s2_total * b_sq + low_part,
-            )
-        return np.asarray(res, dtype=np.int64)
-
-    @staticmethod
-    def _chunked_matmul(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-        """二进制 Base 2^21 分块矩阵乘法，全程纯 int64 运算，消除假阳性误报。
-
-        将输入矩阵位移拆分为 3 个 21 位的数字块（a0, a1, b0, b1 < 2^21, a2, b2 in signed 22-bit）。
-        由于 (2^21)^2 = 2^42，内积在 K <= 2^20 (100万) 内 9 次分块矩阵相乘绝对不溢出 int64。
-        最后通过进位折叠判定并重建结果，全程不升级为 Python 任意精度大整数。
-        """
-        shift = 21
-        b_base = np.int64(1 << shift)
-        mask = np.int64(b_base - 1)
-
-        a0 = a & mask
-        aq1 = a >> shift
-        a1 = aq1 & mask
-        a2 = aq1 >> shift
-
-        b0 = b & mask
-        bq1 = b >> shift
-        b1 = bq1 & mask
-        b2 = bq1 >> shift
-
-        c00 = np.matmul(a0, b0)
-        c01 = np.matmul(a0, b1)
-        c02 = np.matmul(a0, b2)
-
-        c10 = np.matmul(a1, b0)
-        c11 = np.matmul(a1, b1)
-        c12 = np.matmul(a1, b2)
-
-        c20 = np.matmul(a2, b0)
-        c21 = np.matmul(a2, b1)
-        c22 = np.matmul(a2, b2)
-
-        t0 = c00
-        t1 = c01 + c10
-        t2 = c02 + c11 + c20
-        t3 = c12 + c21
-        t4 = c22
-
-        c0, r0 = np.divmod(t0, b_base)
-        t1 = t1 + c0
-        c1, r1 = np.divmod(t1, b_base)
-        t2 = t2 + c1
-        c2, r2 = np.divmod(t2, b_base)
-        t3 = t3 + c2
-        c3, r3 = np.divmod(t3, b_base)
-        t4 = t4 + c3
-
-        high = t4 * b_base + r3
-        overflow = (high != 0) & (high != -1)
-        if np.any(overflow):
-            raise OverflowError("矩阵乘法结果超出 int64 范围")
-
-        low63 = (r2 << 42) | (r1 << 21) | r0
-        with np.errstate(over="ignore"):
-            res = np.where(high == -1, (low63.astype(np.uint64) | np.uint64(1 << 63)).view(np.int64), low63)
-        return np.asarray(res, dtype=np.int64)
+    def _limbs_to_mantissa(limbs: Any, shift: int, mode: str) -> np.ndarray:
+        """精确分块结果 → 目标 scale 的 int64 尾数：shift > 0 时在分块上除以 10^shift 并只舍入一次，
+        shift ≤ 0 时先收口为 int64 再放大（溢出判断复用 _mul_pow10）。只有真实结果超出 int64 才报错。"""
+        if shift > 0:
+            return limbs_to_int64(limbs_round_div_pow10(limbs, shift, mode))
+        return FixedArray._mul_pow10(limbs_to_int64(limbs), -shift)
 
     # ---------- 代数运算与操作符重载（公开 API） ----------
 
@@ -1049,10 +839,14 @@ class FixedArray:
         if b is None:
             return NotImplemented
         a, b_aligned = self._align_scales(self, b)
+        out_mask = self._combine_masks(a._mask, b_aligned._mask)
         res = a._mantissa + b_aligned._mantissa
-        if np.any(((a._mantissa ^ res) & (b_aligned._mantissa ^ res)) < 0):  # 同号相加得到异号才是溢出
+        overflow = ((a._mantissa ^ res) & (b_aligned._mantissa ^ res)) < 0
+        if out_mask is not None:
+            overflow = overflow & (~out_mask)
+        if np.any(overflow):
             raise OverflowError("加法结果超出 int64 范围")
-        return self._from_mantissa(res, a._scale)
+        return self._from_mantissa(res, a._scale, mask=out_mask)
 
     def __radd__(self, other: Any) -> "FixedArray":
         return self.__add__(other)
@@ -1063,10 +857,14 @@ class FixedArray:
         if b is None:
             return NotImplemented
         a, b_aligned = self._align_scales(self, b)
+        out_mask = self._combine_masks(a._mask, b_aligned._mask)
         res = a._mantissa - b_aligned._mantissa
-        if np.any(((a._mantissa ^ b_aligned._mantissa) & (a._mantissa ^ res)) < 0):  # 异号相减结果与被减数异号才是溢出
+        overflow = ((a._mantissa ^ b_aligned._mantissa) & (a._mantissa ^ res)) < 0
+        if out_mask is not None:
+            overflow = overflow & (~out_mask)
+        if np.any(overflow):
             raise OverflowError("减法结果超出 int64 范围")
-        return self._from_mantissa(res, a._scale)
+        return self._from_mantissa(res, a._scale, mask=out_mask)
 
     def __rsub__(self, other: Any) -> "FixedArray":
         b = self._coerce(other, strict=False)
@@ -1080,15 +878,21 @@ class FixedArray:
 
     def __neg__(self) -> "FixedArray":
         """取负，溢出抛出 OverflowError。"""
-        if np.any(self._mantissa == _MIN):
+        overflow = (self._mantissa == _MIN)
+        if self._mask is not None:
+            overflow = overflow & (~self._mask)
+        if np.any(overflow):
             raise OverflowError("取负导致数值超出 int64 范围")
-        return self._from_mantissa(-self._mantissa, self._scale)
+        return self._from_mantissa(-self._mantissa, self._scale, mask=self._mask)
 
     def __abs__(self) -> "FixedArray":
         """绝对值，溢出抛出 OverflowError。"""
-        if np.any(self._mantissa == _MIN):
+        overflow = (self._mantissa == _MIN)
+        if self._mask is not None:
+            overflow = overflow & (~self._mask)
+        if np.any(overflow):
             raise OverflowError("绝对值导致数值超出 int64 范围")
-        return self._from_mantissa(np.abs(self._mantissa), self._scale)
+        return self._from_mantissa(np.abs(self._mantissa), self._scale, mask=self._mask)
 
     def mul_round(self, other: Any, scale: Optional[int] = None,
                   rounding: Optional[Union[RoundingMode, str]] = "half_up") -> "FixedArray":
@@ -1098,7 +902,7 @@ class FixedArray:
         - 当 ``rounding`` 非 None 时（默认 ``"half_up"``）：按 ``rounding`` 舍入到目标 ``scale``
           （若 ``scale=None``，默认保留 ``max(self.scale, other.scale)`` 位小数）。
 
-        内部在快速通道不溢出时直接单指令相乘，否则采用十进制 Base 10^9 分块长乘法，
+        内部在快速通道不溢出时直接单指令相乘，否则采用二进制 Base 2^21 分块长乘法，
         中间运算完全维持在 int64 原生整数内，仅当最终结果超出 int64 范围时才抛出 OverflowError。
 
         Parameters
@@ -1124,20 +928,21 @@ class FixedArray:
                 raise ValueError("rounding=None 时不支持缩小 scale（需要指定舍入模式）")
             mode = "half_up"
         else:
-            mode = self._check_rounding(rounding)
+            mode = check_rounding(rounding)
             target_scale = max(self._scale, other_fa._scale) if scale is None else self._check_scale(scale)
 
+        out_mask = self._combine_masks(self._mask, other_fa._mask)
         shift = natural_scale - target_scale
 
         # 快速通道：若两者全局极值之积在安全范围内且无需额外放大，直接单指令乘法与除法舍入
         if 0 <= shift <= 18 and self._max_abs(self._mantissa) * self._max_abs(other_fa._mantissa) <= _MAX:
             prod = np.multiply(self._mantissa, other_fa._mantissa)
             res_m = prod if shift == 0 else self._divmod_round(prod, 10 ** shift, mode=mode)
-            return self._from_mantissa(res_m, target_scale)
+            return self._from_mantissa(res_m, target_scale, mask=out_mask)
 
         # 纯 int64 分块长乘法通道
-        res_m = self._chunked_mul_round(self._mantissa, other_fa._mantissa, shift, mode=mode)
-        return self._from_mantissa(res_m, target_scale)
+        res_m = self._limbs_to_mantissa(limbs_mul(self._mantissa, other_fa._mantissa), shift, mode)
+        return self._from_mantissa(res_m, target_scale, mask=out_mask)
 
     def __mul__(self, other: Any) -> "FixedArray":
         """乘法：默认保留 a.scale + b.scale 位精确小数，溢出抛出 OverflowError。"""
@@ -1190,22 +995,23 @@ class FixedArray:
                 raise ValueError("rounding=None 时不支持缩小 scale（需要指定舍入模式）")
             mode = "half_up"
         else:
-            mode = self._check_rounding(rounding)
+            mode = check_rounding(rounding)
             target_scale = max(self._scale, other_fa._scale) if scale is None else self._check_scale(scale)
 
         a, b = self._mantissa, other_fa._mantissa
+        out_mask = self._matmul_mask(self._mask, other_fa._mask, a.shape, b.shape)
         terms = a.shape[-1] if a.ndim else 0
         if self._max_abs(a) * self._max_abs(b) * terms <= _MAX:
             result = np.matmul(a, b)  # 形状不合法时由 NumPy 报错
-            raw_fa = self._from_mantissa(result, natural_scale)
-        else:
-            # 慢速保底路径：纯 int64 Base 2^21 分块矩阵乘法判定真实点积，消除正负对冲假阳性误报
-            exact_res = self._chunked_matmul(a, b)
-            raw_fa = self._from_mantissa(exact_res, natural_scale)
+            raw_fa = self._from_mantissa(result, natural_scale, mask=out_mask)
+            if target_scale == natural_scale:
+                return raw_fa
+            return raw_fa.rescale(target_scale, rounding=mode)
 
-        if target_scale == natural_scale:
-            return raw_fa
-        return raw_fa.rescale(target_scale, rounding=mode)
+        # 慢速保底路径：基于 _limbs 分段计算精确内积；降精度时直接在分块上除以 10^k 并舍入，中间值不受 int64 限制
+        shift = natural_scale - target_scale
+        res_m = self._limbs_to_mantissa(limbs_matmul(a, b), shift, mode)
+        return self._from_mantissa(res_m, target_scale, mask=out_mask)
 
     def __matmul__(self, other: Any) -> "FixedArray":
         """矩阵乘法（@ 运算符），scale = 两者之和，全程 int64。"""
@@ -1244,20 +1050,23 @@ class FixedArray:
         OverflowError
             结果超出 int64 范围。
         """
-        mode = self._check_rounding(rounding)
+        mode = check_rounding(rounding)
         other = self._coerce(other)
         target = max(self._scale, other._scale) if scale is None else self._check_scale(scale)
+        out_mask = self._combine_masks(self._mask, other._mask)
+        num, den = self._mantissa, other._mantissa
+        if out_mask is not None:
+            num = np.where(out_mask, np.int64(0), num)
+            den = np.where(out_mask, np.int64(1), den)
         # 商的尾数 = round(a·10^(target + other.scale - self.scale) / b)
         shift = target + other._scale - self._scale
-        num, den = self._mantissa, other._mantissa
         if shift > 0:
-            quotient = self._chunked_divmod_round(num, den, shift, mode)
+            quotient = self._chunked_divmod_round(num, den, shift, mode)  # 内部检查除零与 MIN / -1
         elif shift == 0:
-            self._check_division(num, den)  # -2**63 / -1 = 2**63，结果本身越界
+            self._check_division(num, den)
             q, r = np.divmod(num, den)
-            quotient = self._round_quotient(q, r, den, mode)
-        else:
-            # 还要再除以 10^k（k ≥ 1），-2**63 / -1 的结果放得下；只是 np.divmod 算不了，单独处理
+            quotient = round_quotient(q, r, den, mode)
+        else:  # 结果还要再除以 10^k：MIN / -1 放得下，只检查除零
             if np.any(den == 0):
                 raise ZeroDivisionError("除数包含 0")
             k = -shift
@@ -1268,7 +1077,7 @@ class FixedArray:
                 # round(x / -1) = -round'(x)，round' 为 floor 与 ceil 互换后的模式（其余模式关于 0 对称）
                 mirrored = {"floor": "ceil", "ceil": "floor"}.get(mode, mode)
                 quotient = np.where(special, -self._round_div_pow10(num, 0, 1, k, mirrored), quotient)
-        return self._from_mantissa(quotient, target)
+        return self._from_mantissa(quotient, target, mask=out_mask)
 
     def __truediv__(self, other: Any) -> "FixedArray":
         """真除法：默认保留 max(self.scale, other.scale) 位商精度，half_up 舍入。"""
@@ -1283,8 +1092,8 @@ class FixedArray:
             return NotImplemented
         return other_fa.divide(self)
 
-    def __floordiv__(self, other: Any) -> Any:
-        """向下取整的商（无量纲整数）：标量返回 int，数组返回 int64 数组。
+    def __floordiv__(self, other: Any) -> "FixedArray":
+        """向下取整的商（无量纲整数）：返回 scale 为 0 的 FixedArray，缺失值按掩码传播。
 
         Raises
         ------
@@ -1297,9 +1106,11 @@ class FixedArray:
         if other_fa is None:
             return NotImplemented
         a, b = self._align_scales(self, other_fa)
-        self._check_division(a._mantissa, b._mantissa)
-        q = a._mantissa // b._mantissa
-        return int(q) if np.ndim(q) == 0 else q
+        out_mask = self._combine_masks(a._mask, b._mask)
+        self._check_division(a._mantissa, b._mantissa, mask=out_mask)
+        num = np.where(out_mask, np.int64(0), a._mantissa) if out_mask is not None else a._mantissa
+        den = np.where(out_mask, np.int64(1), b._mantissa) if out_mask is not None else b._mantissa
+        return self._from_mantissa(num // den, 0, mask=out_mask)
 
     def __rfloordiv__(self, other: Any) -> Any:
         other_fa = self._coerce(other, strict=False)
@@ -1313,9 +1124,13 @@ class FixedArray:
         if other_fa is None:
             return NotImplemented
         a, b = self._align_scales(self, other_fa)
-        if np.any(b._mantissa == 0):
+        out_mask = self._combine_masks(a._mask, b._mask)
+        valid_zero = (b._mantissa == 0) if out_mask is None else ((b._mantissa == 0) & (~out_mask))
+        if np.any(valid_zero):
             raise ZeroDivisionError("除数包含 0")
-        return self._from_mantissa(a._mantissa % b._mantissa, a._scale)
+        den = np.where(out_mask, np.int64(1), b._mantissa) if out_mask is not None else b._mantissa
+        res = a._mantissa % den
+        return self._from_mantissa(res, a._scale, mask=out_mask)
 
     def __rmod__(self, other: Any) -> "FixedArray":
         other_fa = self._coerce(other, strict=False)
@@ -1323,17 +1138,14 @@ class FixedArray:
             return NotImplemented
         return other_fa.__mod__(self)
 
-    def __divmod__(self, other: Any) -> Tuple[Any, "FixedArray"]:
+    def __divmod__(self, other: Any) -> Tuple["FixedArray", "FixedArray"]:
         """(商, 余数)：商同 ``//``，余数同 ``%``。"""
         other_fa = self._coerce(other, strict=False)
         if other_fa is None:
             return NotImplemented
-        a, b = self._align_scales(self, other_fa)
-        self._check_division(a._mantissa, b._mantissa)
-        q, r = np.divmod(a._mantissa, b._mantissa)
-        return (int(q) if np.ndim(q) == 0 else q), self._from_mantissa(r, a._scale)
+        return self.__floordiv__(other_fa), self.__mod__(other_fa)
 
-    def __rdivmod__(self, other: Any) -> Tuple[Any, "FixedArray"]:
+    def __rdivmod__(self, other: Any) -> Tuple["FixedArray", "FixedArray"]:
         other_fa = self._coerce(other, strict=False)
         if other_fa is None:
             return NotImplemented
@@ -1341,11 +1153,11 @@ class FixedArray:
 
     # ---------- 张量规约统计（公开 API） ----------
 
-    def sum(self, axis: Optional[Union[int, Tuple[int, ...]]] = None, keepdims: bool = False, out: None = None,
-            dtype: None = None) -> "FixedArray":
+    def sum(self, axis: Optional[Union[int, Tuple[int, ...]]] = None, keepdims: bool = False,
+            skipna: bool = True, out: None = None, dtype: None = None) -> "FixedArray":
         """沿轴求和，全程 int64。``np.sum(fa)`` 也会转到这里。
 
-        精确溢出判定：快速路径在最坏情况不超过 int64 时直接计算；超出时使用 Base 10^9
+        精确溢出判定：快速路径在最坏情况不超过 int64 时直接计算；超出时使用 Base 2^21
         分块累加判定真实结果，只有最终结果真实超出 int64 时才报错。
         全程维持在 int64 原生整数内，不升级为 Python 任意精度大整数。
 
@@ -1355,6 +1167,8 @@ class FixedArray:
             默认对全部元素求和。
         keepdims : bool，可选
             保留被求和的轴。
+        skipna : bool, default True
+            是否忽略缺失值 (NA)。为 True 时缺失元素视为 0；为 False 时若切片包含缺失值则结果为 NA。
         out, dtype : None
             只为兼容 ``np.sum`` 的调用约定；传入非 None 报 TypeError。要 float 请先
             ``to_float()``。
@@ -1366,18 +1180,34 @@ class FixedArray:
         """
         if out is not None or dtype is not None:
             raise TypeError("FixedArray.sum 不支持 out、dtype；要 float 请先 to_float()")
-        total = self._mantissa.sum(axis=axis, keepdims=keepdims)
-        count = self._mantissa.size // max(np.size(total), 1)  # 每个结果单元格累加的元素个数
-        if self._max_abs(self._mantissa) * count <= _MAX:
-            return self._from_mantissa(total, self._scale)
 
-        # 慢速保底路径：纯 int64 Base 10^9 分块累加判定真实求和，消除正负对冲假阳性误报
-        exact_res = self._chunked_sum(self._mantissa, axis=axis, keepdims=keepdims)
-        return self._from_mantissa(exact_res, self._scale)
+        if self._mask is None:
+            out_mask = None
+            eff_m = self._mantissa
+        else:
+            if skipna:
+                out_mask = None
+                eff_m = self._mantissa  # 缺失值在 _set 中已严格恒为 0
+            else:
+                any_na = self._mask.any(axis=axis, keepdims=keepdims)
+                out_mask = any_na if np.any(any_na) else None
+                eff_m = self._mantissa
+
+        total = eff_m.sum(axis=axis, keepdims=keepdims)
+        count = eff_m.size // max(np.size(total), 1)  # 每个结果单元格累加的元素个数
+        if self._max_abs(eff_m) * count <= _MAX:
+            res_m = total
+        else:
+            # 慢速保底路径：纯 int64 Base 2^21 分块累加判定真实求和，消除正负对冲假阳性误报
+            res_m = limbs_sum(eff_m, axis=axis, keepdims=keepdims)
+
+        if out_mask is not None:
+            res_m = np.where(out_mask, np.int64(0), res_m)
+        return self._from_mantissa(res_m, self._scale, mask=out_mask)
 
     def mean(self, axis: Optional[Union[int, Tuple[int, ...]]] = None, keepdims: bool = False,
-             scale: Optional[int] = None, rounding: Union[RoundingMode, str] = "half_up", out: None = None,
-             dtype: None = None) -> "FixedArray":
+             scale: Optional[int] = None, rounding: Union[RoundingMode, str] = "half_up",
+             skipna: bool = True, out: None = None, dtype: None = None) -> "FixedArray":
         """沿轴均值，商余分别累加法防溢出，四舍五入到 scale（默认保留到 self.scale）。
 
         利用商余分别累加消除求和中间溢出假阳性，仅在提升 scale 放大数值时按最大值检验溢出。
@@ -1393,6 +1223,8 @@ class FixedArray:
             目标小数位数，默认保持当前 scale。
         rounding : {"half_up", "half_even", "down", "up", "floor", "ceil"}，默认 "half_up"
             舍入模式。
+        skipna : bool, default True
+            是否忽略缺失值 (NA)。为 True 时只对有效值计算均值（全为 NA 时返回 NA）；为 False 时若切片包含缺失值则结果为 NA。
         out, dtype : None
             只为兼容 ``np.mean`` 的调用约定；传入非 None 报 TypeError。要 float 请先
             ``to_float()``。
@@ -1407,21 +1239,21 @@ class FixedArray:
         if out is not None or dtype is not None:
             raise TypeError("FixedArray.mean 不支持 out、dtype；要 float 请先 to_float()")
 
-        mode = self._check_rounding(rounding)
+        mode = check_rounding(rounding)
         target_scale = self._scale if scale is None else self._check_scale(scale)
         shift = target_scale - self._scale
 
         ndim = self._mantissa.ndim
         AxisError = getattr(getattr(np, "exceptions", np), "AxisError", IndexError)
         if axis is None:
-            count = self._mantissa.size
+            total_count = self._mantissa.size
         elif isinstance(axis, (int, np.integer)):
             if axis < -ndim or axis >= ndim:
                 raise AxisError(f"axis {axis} is out of bounds for array of dimension {ndim}")
-            count = self._mantissa.shape[axis]
+            total_count = self._mantissa.shape[axis]
         elif isinstance(axis, tuple):
             axes = set()
-            count = 1
+            total_count = 1
             for a in axis:
                 if not isinstance(a, (int, np.integer)):
                     raise TypeError(f"tuple axis must contain integers, got {type(a).__name__}")
@@ -1431,23 +1263,45 @@ class FixedArray:
                 if norm_a in axes:
                     raise ValueError("duplicate value in 'axis'")
                 axes.add(norm_a)
-                count *= self._mantissa.shape[norm_a]
+                total_count *= self._mantissa.shape[norm_a]
         else:
             raise TypeError(f"axis must be None, int, or tuple of ints, got {type(axis).__name__}")
 
-        if count == 0:
+        if total_count == 0:
             raise ZeroDivisionError("空数组没有均值")
+
+        if self._mask is None:
+            out_mask = None
+            count = total_count
+            count_keep = total_count
+        else:
+            if skipna:
+                valid_count = (~self._mask).sum(axis=axis, keepdims=keepdims)
+                out_mask = (valid_count == 0)
+                if not np.any(out_mask):
+                    out_mask = None
+                count = np.where(valid_count == 0, 1, valid_count)
+                if not keepdims and axis is not None:
+                    count_keep = (~self._mask).sum(axis=axis, keepdims=True)
+                    count_keep = np.where(count_keep == 0, 1, count_keep)
+                else:
+                    count_keep = count
+            else:
+                any_na = self._mask.any(axis=axis, keepdims=keepdims)
+                out_mask = any_na if np.any(any_na) else None
+                count = total_count
+                count_keep = total_count
 
         with np.errstate(over="ignore"):
             # q_sum 依赖 int64 回绕模运算，与 q_r 相加后得到正确的商总和
-            q, r = np.divmod(self._mantissa, count)
+            q, r = np.divmod(self._mantissa, count_keep)
             q_sum = q.sum(axis=axis, keepdims=keepdims)
             r_sum = r.sum(axis=axis, keepdims=keepdims)
             q_r, r_tot = np.divmod(r_sum, count)
             q_tot = q_sum + q_r
 
         if shift == 0:
-            res = self._round_quotient(q_tot, r_tot, count, mode)
+            res = round_quotient(q_tot, r_tot, count, mode)
         elif shift < 0:
             res = self._round_div_pow10(q_tot, r_tot, count, -shift, mode)
         else:  # shift > 0
@@ -1455,14 +1309,15 @@ class FixedArray:
             if shift > 18 or (top and top > _MAX // 10 ** shift):
                 raise OverflowError(f"均值乘以 10^{shift} 后超出 int64 范围")
             q_base = q_tot * 10 ** shift
-            if count <= _MAX // 10 ** shift:
+            max_c = int(np.max(count)) if hasattr(count, "__iter__") or isinstance(count, np.ndarray) else count
+            if max_c <= _MAX // 10 ** shift:
                 q_frac, r_frac = np.divmod(r_tot * 10 ** shift, count)
             else:
                 q_frac = np.zeros_like(r_tot)
                 cur_r = r_tot.copy()
                 k = shift
                 chunk = 1
-                while chunk < 18 and count * 10 ** (chunk + 1) <= _MAX:
+                while chunk < 18 and max_c * 10 ** (chunk + 1) <= _MAX:
                     chunk += 1
                 while k:
                     c = min(chunk, k)
@@ -1475,38 +1330,57 @@ class FixedArray:
             if np.any((q_base > 0) & (q_base > _MAX - q_frac)):
                 raise OverflowError(f"均值乘以 10^{shift} 后超出 int64 范围")
             Q = q_base + q_frac
-            res = self._round_quotient(Q, r_frac, count, mode)
+            res = round_quotient(Q, r_frac, count, mode)
             if np.any((Q == _MAX) & (res < 0)):
                 raise OverflowError(f"均值乘以 10^{shift} 后超出 int64 范围")
 
-        return self._from_mantissa(res, target_scale)
+        if out_mask is not None:
+            res = np.where(out_mask, np.int64(0), res)
+        return self._from_mantissa(res, target_scale, mask=out_mask)
 
     # ---------- 形状变换与转置（公开 API） ----------
 
     def reshape(self, *shape: Any) -> "FixedArray":
         """矩阵变形。"""
-        return self._from_mantissa(self._mantissa.reshape(*shape), self._scale)
+        new_m = self._mantissa.reshape(*shape)
+        new_mask = self._mask.reshape(*shape) if self._mask is not None else None
+        return self._from_mantissa(new_m, self._scale, mask=new_mask)
 
     def transpose(self, *axes: int) -> "FixedArray":
         """矩阵转置。"""
-        return self._from_mantissa(self._mantissa.transpose(*axes), self._scale)
+        new_m = self._mantissa.transpose(*axes)
+        new_mask = self._mask.transpose(*axes) if self._mask is not None else None
+        return self._from_mantissa(new_m, self._scale, mask=new_mask)
 
     @property
     def T(self) -> "FixedArray":
         return self.transpose()
+
+    def swapaxes(self, axis1: int, axis2: int) -> "FixedArray":
+        """交换两个轴。"""
+        new_m = self._mantissa.swapaxes(axis1, axis2)
+        new_mask = self._mask.swapaxes(axis1, axis2) if self._mask is not None else None
+        return self._from_mantissa(new_m, self._scale, mask=new_mask)
+
+    def squeeze(self, axis: Optional[Union[int, Tuple[int, ...]]] = None) -> "FixedArray":
+        """移除长度为 1 的轴。"""
+        new_m = self._mantissa.squeeze(axis=axis)
+        new_mask = self._mask.squeeze(axis=axis) if self._mask is not None else None
+        return self._from_mantissa(new_m, self._scale, mask=new_mask)
 
     # ---------- 精度调整与网格对齐（公开 API） ----------
 
     def rescale(self, new_scale: int, rounding: Union[RoundingMode, str] = "half_up") -> "FixedArray":
         """调整小数位数到 new_scale；变小时按 rounding 取整，变大时越界报 OverflowError。"""
         new_scale = self._check_scale(new_scale)
-        mode = self._check_rounding(rounding)  # 无论放大、缩小还是不变，都先校验
+        mode = check_rounding(rounding)  # 无论放大、缩小还是不变，都先校验
         if new_scale >= self._scale:
             if new_scale == self._scale:
                 return self
-            return self._from_mantissa(self._mul_pow10(self._mantissa, new_scale - self._scale), new_scale)
+            return self._from_mantissa(self._mul_pow10(self._mantissa, new_scale - self._scale), new_scale,
+                                       mask=self._mask)
         divided = self._round_div_pow10(self._mantissa, 0, 1, self._scale - new_scale, mode)
-        return self._from_mantissa(divided, new_scale)
+        return self._from_mantissa(divided, new_scale, mask=self._mask)
 
     def round_to_step(self, step: Any, rounding: str = "half_up") -> "FixedArray":
         """将定点数矩阵离散对齐到指定的步长网格。
@@ -1534,11 +1408,17 @@ class FixedArray:
         """
         step_fa = self._coerce(step)
         a, b = self._align_scales(self, step_fa)
-        if np.any(b._mantissa <= 0):
+        out_mask = self._combine_masks(a._mask, b._mask)
+        valid_step = (b._mantissa <= 0) if out_mask is None else ((b._mantissa <= 0) & (~out_mask))
+        if np.any(valid_step):
             raise ValueError("步长 step 必须为正数")
-        self._check_rounding(rounding)
-        q = self._divmod_round(a._mantissa, b._mantissa, mode=rounding)
-        return b.mul_round(q, rounding=None)
+        check_rounding(rounding)
+        den = np.where(out_mask, np.int64(1), b._mantissa) if out_mask is not None else b._mantissa
+        q = self._divmod_round(a._mantissa, den, mode=rounding)
+        res = b.mul_round(q, rounding=None)
+        if out_mask is not None:
+            return self._from_mantissa(res._mantissa, res._scale, mask=out_mask)
+        return res
 
     def is_on_step(self, step: Any) -> Union[bool, np.ndarray]:
         """检查定点数是否严格位于指定步长的网格点上。
@@ -1550,36 +1430,102 @@ class FixedArray:
         """
         step_fa = self._coerce(step)
         a, b = self._align_scales(self, step_fa)
-        if np.any(b._mantissa <= 0):
+        out_mask = self._combine_masks(a._mask, b._mask)
+        valid_step = (b._mantissa <= 0) if out_mask is None else ((b._mantissa <= 0) & (~out_mask))
+        if np.any(valid_step):
             raise ValueError("步长 step 必须为正数")
-        rem = a._mantissa % b._mantissa
-        res = rem == 0
+        den = np.where(out_mask, np.int64(1), b._mantissa) if out_mask is not None else b._mantissa
+        rem = a._mantissa % den
+        res = (rem == 0)
+        if out_mask is not None:
+            res = res & (~out_mask)
         return bool(res) if self.ndim == 0 and step_fa.ndim == 0 else res
 
     # ---------- 比较操作符 ----------
 
-    def _compare(self, other: Any, op: Callable) -> Any:
-        """对齐 scale 后比较尾数：标量返回 NumPy bool，数组返回 bool 数组；非数值类型返回 NotImplemented。"""
-        other_fa = self._coerce(other, strict=False)
-        if other_fa is None:
-            return NotImplemented
-        a, b = self._align_scales(self, other_fa)
-        return op(a._mantissa, b._mantissa)
+    def _compare_fixed_array(self, other: "FixedArray", op: Callable) -> Any:
+        """与另一个 FixedArray 精确比较：标量返回 NumPy bool，数组返回 bool 数组；形状不能广播时报错。"""
 
-    def __eq__(self, other: Any) -> Any:  # type: ignore[override]
+        def _cmp_scaled(m_lo: np.ndarray, m_hi: np.ndarray, k: int) -> np.ndarray:
+            """比较 m_lo·10^k 与 m_hi（k > 0），返回 -1 / 0 / 1。
+
+            不放大 m_lo，而是把 m_hi 向下整除 10^k 得到 (q, r)，0 ≤ r < 10^k：
+            m_lo < q 则小于，m_lo > q 则大于，相等时 r 非 0 则小于、否则相等。任何 scale 差都不会溢出。
+            """
+            if k > 18:  # |m_hi| < 10^19 ≤ 10^k：商只能是 0 或 -1，余数非 0 当且仅当 m_hi 非 0
+                q = np.where(m_hi < 0, -1, 0)
+                r_pos = m_hi != 0
+            else:
+                q, r = np.divmod(m_hi, np.int64(10 ** k))
+                r_pos = r != 0
+            return np.where(m_lo < q, -1, np.where(m_lo > q, 1, np.where(r_pos, -1, 0)))
+
+        k = other._scale - self._scale
+        if k == 0:
+            raw_cmp = op(self._mantissa, other._mantissa)
+        elif k > 0:
+            raw_cmp = op(_cmp_scaled(self._mantissa, other._mantissa, k), 0)
+        else:
+            raw_cmp = op(-_cmp_scaled(other._mantissa, self._mantissa, -k), 0)
+
+        out_mask = self._combine_masks(self._mask, other._mask)
+        if out_mask is None:
+            return raw_cmp
+        if op is np.not_equal:
+            res = np.where(out_mask, True, raw_cmp)
+        else:
+            res = np.where(out_mask, False, raw_cmp)
+        return res[()] if res.ndim == 0 else res
+
+    def _compare(self, other: Any, op: Callable) -> Any:
+        """统一比较网关：非数值类型返回 NotImplemented；处理形状广播与不可表示数值。"""
+        if isinstance(other, FixedArray):
+            return self._compare_fixed_array(other, op)
         try:
             other_fa = self._coerce(other, strict=False)
-        except (ValueError, OverflowError):  # 数值本身无法表示（NaN、超出 int64 等）视为不相等
-            return False
+        except (ValueError, OverflowError):
+            if op is np.equal:
+                return self._eq_unrepresentable(other)
+            if op is np.not_equal:
+                eq = self._eq_unrepresentable(other)
+                return not eq if isinstance(eq, bool) else ~eq
+            raise
         if other_fa is None:
             return NotImplemented
-        return self._compare(other_fa, np.equal)  # 形状不匹配是真错误，照常抛出
+        return self._compare_fixed_array(other_fa, op)
+
+    def _eq_unrepresentable(self, other: Any) -> Any:
+        """other 含无法表示的数值（NaN、inf、超出 int64 等）时逐元素判等：这些位置一律不相等。"""
+        values = self._expand_nested(other) if isinstance(other, (list, tuple)) else other
+        mine, arr = np.broadcast_arrays(self._mantissa, np.asarray(values))  # 形状不齐等真错误照常抛出
+        out = np.zeros(arr.shape, dtype=bool)
+        flat_m, flat_o, flat_out = mine.ravel(), arr.ravel(), out.reshape(-1)
+        if arr.dtype.kind == "f":
+            idx = np.flatnonzero(np.isfinite(flat_o) & (np.abs(flat_o) < 2.0 ** 63))
+            try:
+                other_fa = FixedArray(flat_o[idx])
+            except OverflowError:  # 量级悬殊的 float 无法对齐到同一 scale：退回逐个比较
+                pass
+            else:
+                flat_out[idx] = self._from_mantissa(flat_m[idx], self._scale)._compare_fixed_array(other_fa, np.equal)
+                idx = ()
+        else:
+            idx = range(flat_o.size)
+        for i in idx:
+            try:
+                other_fa = FixedArray(flat_o[i])
+            except (ValueError, OverflowError):
+                continue
+            flat_out[i] = self._from_mantissa(flat_m[i], self._scale)._compare_fixed_array(other_fa, np.equal)
+        if self._mask is not None:  # 自身的缺失值与任何值都不相等
+            out &= ~np.broadcast_to(self._mask, out.shape)
+        return out if out.ndim else out[()]
+
+    def __eq__(self, other: Any) -> Any:  # type: ignore[override]
+        return self._compare(other, np.equal)
 
     def __ne__(self, other: Any) -> Any:  # type: ignore[override]
-        eq = self.__eq__(other)
-        if eq is NotImplemented:
-            return NotImplemented
-        return not eq if isinstance(eq, bool) else ~eq
+        return self._compare(other, np.not_equal)
 
     def __lt__(self, other: Any) -> Any:
         return self._compare(other, np.less)
@@ -1596,7 +1542,9 @@ class FixedArray:
     # ---------- 索引、切片与 NumPy 协议 ----------
 
     def __getitem__(self, key: Any) -> "FixedArray":
-        return self._from_mantissa(self._mantissa[key], self._scale)
+        new_m = self._mantissa[key]
+        new_mask = self._mask[key] if self._mask is not None else None
+        return self._from_mantissa(new_m, self._scale, mask=new_mask)
 
     def __len__(self) -> int:
         return len(self._mantissa)
@@ -1606,6 +1554,8 @@ class FixedArray:
         if self._mantissa.size != 1:
             raise ValueError(
                 "The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()")
+        if self._mask is not None and bool(self._mask.item()):
+            raise TypeError("缺失值（NA）的真值不明确")
         return bool(self._mantissa.item())
 
     def __iter__(self):
@@ -1618,26 +1568,92 @@ class FixedArray:
         """禁止隐式转成 NumPy 数组（np.asarray、np.concatenate 等），避免悄悄变成 float。"""
         raise TypeError("FixedArray 不能隐式转成数组：要 float 请用 to_float()，要整数尾数请用 .mantissa")
 
+    def __array_function__(self, func: Any, types: Any, args: Any, kwargs: Any) -> Any:
+        return FixedArray._array_function(func, args, kwargs, "FixedArray")
+
+    @staticmethod
+    def _array_function(func: Any, args: Any, kwargs: Any, name: str) -> Any:
+        """NumPy 函数白名单（FixedArray 与 UnitArray 共用）。
+
+        np.sum、np.mean、np.transpose、np.shape、np.ndim、np.size 转给对象自身的方法；
+        np.array_equal、np.array_equiv 精确判等；其余一律报 TypeError——否则像 np.array_equal 这样
+        内部吞掉异常的函数会静默返回错误结果。
+        """
+        if func is np.array_equal:
+            return FixedArray._numpy_equal(*args, broadcast=False, **kwargs)
+        if func is np.array_equiv:
+            return FixedArray._numpy_equal(*args, broadcast=True, **kwargs)
+        if func in _NUMPY_DISPATCHED:
+            return func._implementation(*args, **kwargs)
+        raise TypeError(f"{name} 不支持 numpy.{func.__name__}，请使用 {name} 自身的方法")
+
+    @staticmethod
+    def _numpy_equal(a1: Any, a2: Any, broadcast: bool, equal_nan: bool = False) -> bool:
+        """np.array_equal（形状相同）与 np.array_equiv（可广播）：逐元素精确相等。
+
+        equal_nan 为 True 时缺失值（Null / NA）之间视为相等。
+        """
+
+        def shape(x: Any) -> Tuple[int, ...]:
+            if hasattr(x, "shape"):
+                return x.shape
+            return np.shape(FixedArray._expand_nested(x) if isinstance(x, (list, tuple)) else x)
+
+        if not broadcast and shape(a1) != shape(a2):
+            return False
+        try:
+            if equal_nan:
+                fa1 = FixedArray._coerce(a1, strict=False)
+                fa2 = FixedArray._coerce(a2, strict=False)
+                if fa1 is not None and fa2 is not None:
+                    m1 = fa1.isna()
+                    m2 = fa2.isna()
+                    both_na = m1 & m2
+                    one_na = m1 ^ m2
+                    if np.any(one_na):
+                        return False
+                    eq = (fa1 == fa2) | both_na
+                    return bool(np.all(eq))
+            eq = a1 == a2
+        except ValueError:  # 形状不能广播
+            return False
+        return bool(np.all(eq))
+
     # ---------- 导出与类型转换（公开 API） ----------
 
     def to_float(self) -> Union[float, np.ndarray]:
-        """转换为标准浮点数（标量返回 float，数组返回 float64 ndarray）。"""
+        """转换为标准浮点数（标量返回 float，数组返回 float64 ndarray）。缺失值转为 np.nan。"""
         if self._mantissa.ndim == 0:
+            if self._mask is not None and bool(self._mask):
+                return float("nan")
             return int(self._mantissa) / (10 ** self._scale)
         m = self._mantissa
         s = self._scale
         if s <= 22 and np.all(np.abs(m) <= 2 ** 53):
-            return m.astype(np.float64) / (10.0 ** s)
-        pow10 = 10 ** s
-        fn = np.vectorize(lambda x: int(x) / pow10, otypes=[np.float64])
-        return fn(m)
+            res = m.astype(np.float64) / (10.0 ** s)
+        else:
+            pow10 = 10 ** s
+            fn = np.vectorize(lambda x: int(x) / pow10, otypes=[np.float64])
+            res = fn(m)
+        if self._mask is not None:
+            res = np.where(self._mask, np.nan, res)
+        return res
 
-    def to_decimal(self) -> Union[Decimal, np.ndarray]:
-        """转换为 Python 标准库 Decimal 对象（标量返回 Decimal，数组返回 object ndarray）。"""
+    def to_decimal(self) -> Union[Decimal, None, np.ndarray]:
+        """转换为 Python 标准库 Decimal 对象（标量返回 Decimal 或 None，数组返回 object ndarray）。缺失值转为 None。"""
         if self._mantissa.ndim == 0:
+            if self._mask is not None and bool(self._mask):
+                return None
             return Decimal(int(self._mantissa)).scaleb(-self._scale)
-        fn = np.vectorize(lambda m: Decimal(int(m)).scaleb(-self._scale), otypes=[object])
-        return fn(self._mantissa)
+        if self._mask is None:
+            fn = np.vectorize(lambda m: Decimal(int(m)).scaleb(-self._scale), otypes=[object])
+            return fn(self._mantissa)
+
+        def _cvt(m: int, is_na: bool) -> Any:
+            return None if is_na else Decimal(int(m)).scaleb(-self._scale)
+
+        fn = np.vectorize(_cvt, otypes=[object])
+        return fn(self._mantissa, self._mask)
 
     def to_pandas(self, index: Optional[Any] = None, name: Optional[str] = None, as_float: bool = True) -> Any:
         """导出为 pandas.Series 或 pandas.DataFrame。
@@ -1691,8 +1707,8 @@ class FixedArray:
 
         if self.ndim > 1:
             raise ValueError(f"to_polars 仅支持 1 维或标量 FixedArray，当前维度为 {self.ndim}")
-        if as_float:
-            return pl.Series(name, [self.to_float()] if self.ndim == 0 else self.to_float())
+        if as_float:  # 尾数不含 NaN，NaN 只来自缺失值：转为 null，与 as_float=False 一致
+            return pl.Series(name, np.atleast_1d(self.to_float()), nan_to_null=True)
         if self._scale > 38:
             raise ValueError(f"polars.Decimal 最多支持 38 位小数，当前 scale 为 {self._scale}；"
                              "请先 rescale 或使用 as_float=True")
@@ -1707,10 +1723,26 @@ class FixedArray:
 
     def __str__(self) -> str:
         if self._mantissa.ndim == 0:
+            if self._mask is not None and bool(self._mask):
+                return "<NA>"
             return self._format_scalar(int(self._mantissa), self._scale)
+        if self._mask is None:
+            return np.array2string(
+                self._mantissa,
+                formatter={"all": lambda x: self._format_scalar(int(x), self._scale)},
+                separator=", ",
+            )
+        str_arr = np.empty(self.shape, dtype=object)
+        flat_m = self._mantissa.ravel()
+        flat_mask = self._mask.ravel()
+        flat_str = [
+            "<NA>" if flat_mask[i] else self._format_scalar(int(flat_m[i]), self._scale)
+            for i in range(flat_m.size)
+        ]
+        str_arr.ravel()[:] = flat_str
         return np.array2string(
-            self._mantissa,
-            formatter={"all": lambda x: self._format_scalar(int(x), self._scale)},
+            str_arr,
+            formatter={"all": lambda x: str(x)},
             separator=", ",
         )
 
@@ -1723,5 +1755,7 @@ class FixedArray:
         digits = str(abs(m)).zfill(scale + 1)
         return f"{sign}{digits[:-scale]}.{digits[-scale:]}"
 
+
+_NUMPY_DISPATCHED = frozenset({np.sum, np.mean, np.transpose, np.shape, np.ndim, np.size})
 
 __all__ = ["FixedArray", "RoundingMode"]
