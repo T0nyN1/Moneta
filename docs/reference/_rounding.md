@@ -213,22 +213,18 @@ NumPy 布尔数组向量化计算。
 ```python
 >> > from moneta._rounding import decide_bump
 >> >  # 对 +2.5 取整：q = 2 (偶, odd_q=False), exact_half=True
->> > bool(decide_bump("half_up", is_negative=False, odd_q=False, has_fraction=True,
-                      ...
-over_half = False, exact_half = True, floor_base = True))
+>> > bool(decide_bump("half_up", is_negative=False, odd_q=False, has_fraction=True, over_half=False, exact_half=True,
+                      floor_base=True))
 True
->> > bool(decide_bump("half_even", is_negative=False, odd_q=False, has_fraction=True,
-                      ...
-over_half = False, exact_half = True, floor_base = True))
+>> > bool(decide_bump("half_even", is_negative=False, odd_q=False, has_fraction=True, over_half=False, exact_half=True,
+                      floor_base=True))
 False
 >> >  # 向零截断基准下对 -2.7 取整：|q| = 2, is_negative=True, over_half=True
->> > int(decide_bump("down", is_negative=True, odd_q=False, has_fraction=True,
-                     ...
-over_half = True, exact_half = False, floor_base = False))
+>> > int(decide_bump("down", is_negative=True, odd_q=False, has_fraction=True, over_half=True, exact_half=False,
+                     floor_base=False))
 0
->> > int(decide_bump("floor", is_negative=True, odd_q=False, has_fraction=True,
-                     ...
-over_half = True, exact_half = False, floor_base = False))
+>> > int(decide_bump("floor", is_negative=True, odd_q=False, has_fraction=True, over_half=True, exact_half=False,
+                     floor_base=False))
 1
 ```
 

@@ -80,13 +80,13 @@ $$v = \text{mantissa} \times 10^{-\text{scale}}$$
 `float`。舍入规则与进位裁决统一由 [`moneta._rounding`](_rounding.md) 提供，而多精度无溢出慢路径统一由 [
 `moneta._limbs`](_limbs.md)（二进制 Base $2^{21}$ 动态分块内核）提供：
 
-| 运算             | 快路径（绝大多数输入）                                                                               | 慢路径（最坏上界超出 `int64` 时自动切换）                                                                                                    |
-|------------------|------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------|
-| `+` `-`          | 一次整数加减 + 符号位异或溢出检测                                                                    | —                                                                                                                                            |
-| `*`、`mul_round` | `max                                                                                                 | a                                                                                                                                            | · max|b| <= 2^63 - 1` 且 `0 <= shift <= 18` 时单指令乘法 + 带余除法 | [`limbs_mul`](_limbs.md#limbs_mul)（Base $2^{21}$ 的 $3\times 3$ 块卷积）+ [`_limbs_to_mantissa`](#fixedarray_limbs_to_mantissa) |
-| `@`、`matmul`    | `max                                                                                                 | a                                                                                                                                            | · max|b| · K <= 2^63 - 1` 时直接调用 `np.matmul` | [`limbs_matmul`](_limbs.md#limbs_matmul)（按 `STEP_K = 2^19` 分段 Base $2^{21}$ 块内积）+ [`_limbs_to_mantissa`](#fixedarray_limbs_to_mantissa) |
-| `sum`            | `max                                                                                                 | a                                                                                                                                            | · count <= 2^63 - 1` 时直接调用 `np.sum` | [`limbs_sum`](_limbs.md#limbs_sum)（拆为 3 个 21 位块沿轴求和后进位规整收口） |
-| `divide`         | [`round_quotient`](_rounding.md#round_quotient) 或 [`_round_div_pow10`](#fixedarray_round_div_pow10) | [`_chunked_divmod_round`](#fixedarray_chunked_divmod_round) 分段长除法；大除数自动切换 [`_doubling_step_10r`](#fixedarray_doubling_step_10r) |
+| 运算             | 快路径（绝大多数输入）                                                                               | 慢路径（最坏上界超出 `int64` 时自动切换）                                                                                                       |
+|------------------|------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------|
+| `+` `-`          | 一次整数加减 + 符号位异或溢出检测                                                                    | —                                                                                                                                               |
+| `*`、`mul_round` | `max(abs(a)) * max(abs(b)) <= 2^63 - 1` 且 `0 <= shift <= 18` 时单指令乘法 + 带余除法                | [`limbs_mul`](_limbs.md#limbs_mul)（Base $2^{21}$ 的 $3\times 3$ 块卷积）+ [`_limbs_to_mantissa`](#fixedarray_limbs_to_mantissa)                |
+| `@`、`matmul`    | `max(abs(a)) * max(abs(b)) * K <= 2^63 - 1` 时直接调用 `np.matmul`                                   | [`limbs_matmul`](_limbs.md#limbs_matmul)（按 `STEP_K = 2^19` 分段 Base $2^{21}$ 块内积）+ [`_limbs_to_mantissa`](#fixedarray_limbs_to_mantissa) |
+| `sum`            | `max(abs(a)) * count <= 2^63 - 1` 时直接调用 `np.sum`                                                | [`limbs_sum`](_limbs.md#limbs_sum)（拆为 3 个 21 位块沿轴求和后进位规整收口）                                                                   |
+| `divide`         | [`round_quotient`](_rounding.md#round_quotient) 或 [`_round_div_pow10`](#fixedarray_round_div_pow10) | [`_chunked_divmod_round`](#fixedarray_chunked_divmod_round) 分段长除法；大除数自动切换 [`_doubling_step_10r`](#fixedarray_doubling_step_10r)    |
 
 ## API 速查表
 
@@ -352,8 +352,6 @@ FixedArray([[1.0, 2.0],
 FixedArray(1.3, scale=1)
 ```
 
-非法输入：
-
 缺失值（`None`、`NaN`、`Decimal("NaN")`、`"nan"`）与显式 `mask`：
 
 ```python
@@ -376,11 +374,10 @@ ValueError: 1/3 不是有限小数
 Traceback (most recent call last):
     ...
 ValueError: 输入的小数位数 (3) 超出指定 scale (2)
->> > FixedArray(float("inf"))
+>>> FixedArray(float("inf"))
 Traceback (most recent call last):
     ...
-ValueError: FixedArray
-不能包含无穷大(inf)
+ValueError: FixedArray 不能包含无穷大 (inf)
 >>> FixedArray(True)
 Traceback (most recent call last):
     ...
@@ -692,8 +689,8 @@ FixedArray.notnull()
 
 ```python
 >> > a = FixedArray(["1.50", None, "2.25"])
->> > a.isna(), a.notna()
-(array([False, True, False]), array([True, False, True]))
+>> > a.isna().tolist(), a.notna().tolist()
+([False, True, False], [True, False, True])
 >> > bool((a.isnull() == a.isna()).all() and (a.notnull() == a.notna()).all())
 True
 ```
@@ -729,19 +726,15 @@ FixedArray.fillna(value)
 **示例**
 
 ```python
->> > a = FixedArray(["1.5", None, "2.25"])
->> > a.fillna(0)
+>>> a = FixedArray(["1.5", None, "2.25"])
+>>> a.fillna(0)
 FixedArray([1.50, 0.00, 2.25], scale=2)
->> > a.fillna(FixedArray(["0", "9.999", "0"]))
+>>> a.fillna(FixedArray(["0", "9.999", "0"]))
 FixedArray([1.500, 9.999, 2.250], scale=3)
->> > a.fillna(None)
-Traceback(most
-recent
-call
-last):
-...
-ValueError: fillna
-的填充值不能是缺失值
+>>> a.fillna(None)
+Traceback (most recent call last):
+    ...
+ValueError: fillna 的填充值不能是缺失值
 ```
 
 **另请参阅**
@@ -768,19 +761,12 @@ FixedArray.dropna()
 **示例**
 
 ```python
->> > FixedArray(["1.50", None, "2.25", None]).dropna()
+>>> FixedArray(["1.50", None, "2.25", None]).dropna()
 FixedArray([1.50, 2.25], scale=2)
->> > FixedArray([[1, None], [2, 3]]).dropna()
-Traceback(most
-recent
-call
-last):
-...
-ValueError: dropna()
-仅支持
-1
-维
-FixedArray
+>>> FixedArray([[1, None], [2, 3]]).dropna()
+Traceback (most recent call last):
+    ...
+ValueError: dropna() 仅支持 1 维 FixedArray
 ```
 
 **另请参阅**
@@ -1030,9 +1016,7 @@ FixedArray(1.030301, scale=6)
 >>> FixedArray(10 ** 10) * FixedArray(10 ** 10)
 Traceback (most recent call last):
     ...
-OverflowError: 结果超出
-int64
-范围
+OverflowError: 结果超出 int64 范围
 ```
 
 **性能对比**
@@ -1110,9 +1094,7 @@ FixedArray(2.50000, scale=5)
 >>> notional * fx
 Traceback (most recent call last):
     ...
-OverflowError: 结果超出
-int64
-范围
+OverflowError: 结果超出 int64 范围
 >>> notional.mul_round(fx, scale=6)  # 精确值 15241567763.923281703552
 FixedArray(15241567763.923282, scale=6)
 >>> FixedArray("1.25").mul_round(FixedArray("1.5"), scale=1, rounding=None)
@@ -1443,9 +1425,7 @@ FixedArray([[5.0, 2.0],
 >>> FixedArray([[x, x]]) @ FixedArray([[x], [x]])
 Traceback (most recent call last):
     ...
-OverflowError: 结果超出
-int64
-范围
+OverflowError: 结果超出 int64 范围
 >>> np.array([[x, x]]) @ np.array([[x], [x]])  # 错误结果，没有任何警告
 array([[-11857053614]])
 >>> FixedArray([[x, x]]) @ FixedArray([[x], [-x]])
@@ -1597,10 +1577,8 @@ FixedArray(0.3, scale=1)
 >>> FixedArray([2 ** 62, 2 ** 62]).sum()
 Traceback (most recent call last):
     ...
-OverflowError: 结果超出
-int64
-范围
->> > int(np.array([2 ** 62, 2 ** 62]).sum())
+OverflowError: 结果超出 int64 范围
+>>> int(np.array([2 ** 62, 2 ** 62]).sum())
 -9223372036854775808
 >>> FixedArray([2 ** 62, 2 ** 62, -2 ** 62]).sum()  # 部分和越界、结果在范围内
 FixedArray(4611686018427387904, scale=0)
@@ -1959,7 +1937,7 @@ False
 True
 >>> FixedArray(1) == True  # bool 不是合法的数值操作数
 False
->> > bool(FixedArray(1) == float("nan"))
+>>> bool(FixedArray(1) == float("nan"))
 False
 >>> pair = FixedArray([1, 2])
 >>> if pair == FixedArray([1, 2]):
@@ -2275,12 +2253,9 @@ iter(a)
 [FixedArray(1.5, scale=1), FixedArray(2.5, scale=1)]
 >>> bool(FixedArray("0.01")), bool(FixedArray(0)), bool(FixedArray([0]))
 (True, False, False)
->> > bool(FixedArray(None))
-Traceback(most
-recent
-call
-last):
-...
+>>> bool(FixedArray(None))
+Traceback (most recent call last):
+    ...
 TypeError: 缺失值（NA）的真值不明确
 >>> bool(FixedArray([1, 2]))
 Traceback (most recent call last):
@@ -2884,7 +2859,7 @@ FixedArray._as_int64(x)
 **示例**
 
 ```python
->> > FixedArray._as_int64([1, 2, 3])
+>>> FixedArray._as_int64([1, 2, 3])
 array([1, 2, 3])
 >>> FixedArray._as_int64(2 ** 63)
 Traceback (most recent call last):
@@ -3027,8 +3002,9 @@ FixedArray._parse_float_array(arr, target_scale=None)
 ```python
 >>> FixedArray._parse_float_array(np.array([0.1, 0.25]))
 (array([10, 25]), 2)
->> > FixedArray._parse_float_array(np.array([0.126, 2.5]), target_scale=2)
-(array([13, 250]), 2)
+>> > m, s = FixedArray._parse_float_array(np.array([0.126, 2.5]), target_scale=2)
+>> > m.tolist(), s
+([13, 250], 2)
 ```
 
 ### FixedArray._align_mantissas
@@ -3113,8 +3089,8 @@ FixedArray._check_division(m, d, mask=None)
 Traceback (most recent call last):
     ...
 OverflowError: -2**63 除以 -1 超出 int64 范围
->> >  # 被 mask 标记为缺失的位置会被安全跳过
->> > FixedArray._check_division(np.array([1], dtype=np.int64), np.array([0], dtype=np.int64), mask=np.array([True]))
+>>>  # 被 mask 标记为缺失的位置会被安全跳过
+>>> FixedArray._check_division(np.array([1], dtype=np.int64), np.array([0], dtype=np.int64), mask=np.array([True]))
 ```
 
 ### FixedArray._max_abs

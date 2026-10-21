@@ -7,13 +7,8 @@
 
 ```python
 >> > import numpy as np
->> > from moneta._limbs import (
-
-...
-split_int64, normalize_limbs, limbs_mul, limbs_matmul,
-...
-limbs_sum, limbs_round_div_pow10, limbs_to_int64,
-... )
+>> > from moneta._limbs import split_int64, normalize_limbs, limbs_mul, limbs_matmul, limbs_sum, limbs_round_div_pow10,
+    limbs_to_int64
 >> > big = np.array([10 ** 15, -10 ** 15], dtype=np.int64)
 >> > prod_limbs = limbs_mul(big, np.array([10 ** 6, 10 ** 6], dtype=np.int64))  # 中间积 10^21 > 2^63 - 1
 >> > div_limbs = limbs_round_div_pow10(prod_limbs, k=6, mode="half_up")  # 在分块上除以 10^6 并舍入
