@@ -58,7 +58,7 @@ class TestConstruct:
         c = Currency("ABC", digits)
         assert c.digits == int(digits) and type(c.digits) is int
 
-    @pytest.mark.parametrize("code", ["", "US", "ABCDEF", "US1", "U-S", "美元", "  "])
+    @pytest.mark.parametrize("code", ["", "US", "ABCDEF", "US1", "U-S", "美元", "  ", "ＵＳＤ", "ußd", "usdı", "ǆab"])
     def test_rejects_invalid_code(self, code):
         with pytest.raises(ValueError, match="3 到 5 个英文字母"):
             Currency(code, 2)
@@ -93,12 +93,12 @@ class TestConstruct:
 class TestImmutable:
     @pytest.mark.parametrize("attr", ["_code", "_digits", "_symbol", "_name", "code", "digits", "extra"])
     def test_cannot_set(self, attr):
-        with pytest.raises(AttributeError, match="不可变"):
+        with pytest.raises(AttributeError, match="禁止设置属性"):
             setattr(USD, attr, 5)
         assert USD.digits == 2 and USD.code == "USD"
 
     def test_cannot_delete(self):
-        with pytest.raises(AttributeError, match="不可变"):
+        with pytest.raises(AttributeError, match="禁止删除属性 '_digits'"):
             del USD._digits
         assert USD.digits == 2
 

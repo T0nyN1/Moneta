@@ -50,8 +50,10 @@ class Currency:
     def __init__(self, code: str, digits: int, symbol: str = "", name: str = "") -> None:
         if not isinstance(code, str):
             raise TypeError(f"货币代码必须是 str，收到 {type(code).__name__}")
-        normalized = code.strip().upper()
-        if not _CODE_RE.match(normalized):
+        stripped = code.strip()
+        normalized = stripped.upper()
+        # 先要求 ASCII：str.upper() 会做 Unicode 大小写映射（如 "ß" → "SS"、"ı" → "I"），否则非 ASCII 字母会混进代码
+        if not stripped.isascii() or not _CODE_RE.match(normalized):
             raise ValueError(f"货币代码必须是 3 到 5 个英文字母，收到 {code!r}")
         if isinstance(digits, (bool, np.bool_)):  # NumPy < 2 的 np.bool_ 仍能被 operator.index 接受
             raise TypeError("digits 不能是 bool")
@@ -101,7 +103,7 @@ class Currency:
         raise AttributeError(f"Currency 是不可变对象，禁止设置属性 '{key}'")
 
     def __delattr__(self, key: str) -> None:
-        raise AttributeError(f"Currency 是不可变对象，禁止设置属性 '{key}'")
+        raise AttributeError(f"Currency 是不可变对象，禁止删除属性 '{key}'")
 
     # ---------- 单例语义：copy / deepcopy / pickle ----------
 
@@ -245,18 +247,5 @@ def _init_defaults() -> None:
 
 _init_defaults()
 
-__all__ = [
-    "Currency",
-    "CurrencyRegistry",
-    "get_currency",
-    "CNY",
-    "USD",
-    "EUR",
-    "JPY",
-    "GBP",
-    "HKD",
-    "AUD",
-    "CAD",
-    "CHF",
-    "SGD",
-]
+__all__ = ["Currency", "CurrencyRegistry", "get_currency", "CNY", "USD", "EUR", "JPY", "GBP", "HKD", "AUD", "CAD",
+           "CHF", "SGD"]

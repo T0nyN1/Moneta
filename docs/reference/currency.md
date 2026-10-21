@@ -1,7 +1,8 @@
 # Currency — 币种定义与享元注册表
 
 `moneta.currency` 模块定义法定货币与金融资产的量纲、最小原子结算精度（`digits`）以及全局享元单例注册表（`CurrencyRegistry`）。
-它是上层 `Money`、`ExchangeRate` 与 `Portfolio`  enforcing 量纲安全与法定精度对齐的基础：同一币种代码在全局注册表中保证只有唯一事实定义，不允许被篡改或静默覆盖。
+它是上层 [`Money`](money.md)、[`Price`](price.md)、`ExchangeRate` 与 `Portfolio`
+强制保证量纲安全与法定精度对齐的基础：同一币种代码在全局注册表中保证只有唯一事实定义，不允许被篡改或静默覆盖。
 
 ```python
 >>> from moneta import Currency, CurrencyRegistry, get_currency, USD, CNY, JPY
@@ -27,11 +28,12 @@ True
 每个 [`Currency`](#currencycode-digits-symbol-name) 实例包含四个只读槽位（
 `__slots__ = ("_code", "_digits", "_symbol", "_name")`）：
 
-- **`code`**：货币或资产代码。构造时自动去除首尾空白并转为大写，必须由 **3 到 5 个英文字母**组成（既涵盖 ISO 4217 的三字母法币代码如
-  `"USD"`、`"CNY"`，也支持 `"USDT"`、`"USDC"` 等 4–5 字母的数字资产或自定义代码）。
+- **`code`**：货币或资产代码。构造时自动去除首尾空白并转为大写，必须由 **3 到 5 个英文字母**组成（正则 [
+  `_CODE_RE = r"^[A-Z]{3,5}$"`](#_code_re-与-_max_digits)，既涵盖 ISO 4217 的三字母法币代码如 `"USD"`、`"CNY"`，也支持
+  `"USDT"`、`"USDC"` 等 4–5 字母的数字资产或自定义代码）。
 - **`digits`**：最小不可分割结算单位对应的小数位数（如美元/人民币的“分”对应 `2`，日元对应 `0`，巴林第纳尔对应 `3`）。必须是 **
-  `0 <= digits <= 18` 的整数**（底层 [`FixedArray`](fixed_array.md) 采用有符号 `int64` 尾数，在 `scale=18`
-  下仍可精确表示约 $\pm 9.22$），显式拒绝 `bool` 与 `float`。
+  `0 <= digits <= 18` 的整数**（[`_MAX_DIGITS = 18`](#_code_re-与-_max_digits)：底层 [`FixedArray`](fixed_array.md) 采用有符号
+  `int64` 尾数，在 `scale=18` 下仍可精确表示约 $\pm 9.22$），显式拒绝 `bool` 与 `float`。
 - **`symbol` 与 `name`**：展示用的货币符号（默认 `""`）与全称（默认等于标准化后的 `code`）。
 
 `Currency` 在构造后完全 **不可变**：重写了 `__setattr__` 与 `__delattr__`，任何修改或删除属性的操作都会直接抛出
@@ -46,47 +48,48 @@ True
    尚未注册则存入；若已注册且四元组 `(code, digits, symbol, name)` 完全相同则无副作用直接返回；只要有任何一个字段不同即抛出
    `ValueError`。注册表 **不提供强制覆盖开关**，内置的 10 种常用货币永远不可被篡改。
 2. **输入归一化与冲突拦截**：调用 [`get_currency(cur)`](#get_currency) 或 [
-   `CurrencyRegistry.get(cur)`](#currencyregistryget) 时：
-    - 传入字符串（如 `"usd"`、`" EUR "`）：去首尾空白并转大写后查找注册表，返回对应的单例；未注册则抛出 `KeyError`。
-    - 传入 `Currency` 实例：若其 `code` 已在注册表中且四元组定义一致，则自动归并并返回 **注册表中的单例**
-      ；若与注册表中的同代码定义有任何字段冲突（例如传入私自构造的 `Currency("USD", 3)`），立即抛出 `ValueError`
-      ；若该代码尚未注册，则原样返回该自定义实例。
+   `CurrencyRegistry.get(cur)`](#currencyregistryget)（也是 [`Money`](money.md) 与 [`Price`](price.md) 构造时的统一币种解析入口）时：
+   - 传入字符串（如 `"usd"`、`" EUR "`）：去首尾空白并转大写后查找注册表，返回对应的单例；未注册则抛出 `KeyError`。
+   - 传入 `Currency` 实例：若其 `code` 已在注册表中且四元组定义一致，则自动归并并返回 **注册表中的单例**
+     ；若与注册表中的同代码定义有任何字段冲突（例如传入私自构造的 `Currency("USD", 3)`），立即抛出 `ValueError`
+     ；若该代码尚未注册，则原样返回该自定义实例（允许临时使用未注册的自定义币种构造 `Money` 或 `Price`）。
 
 ### 相等性、拷贝与序列化语义
 
-| 操作                               | 行为与语义                                                                                                                                                                                                    |
-|------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `c1 == c2`、`c1 != c2`             | 仅比较量纲核心字段 `(code, digits)`；展示字段 `symbol` 与 `name` 不影响相等性。与非 `Currency` 对象（如字符串 `"USD"`）比较返回 `False` / `True`。                                                            |
-| `hash(c)`                          | 基于 `hash(c.code)` 计算，可安全作为 `dict` 键或放入 `set`。                                                                                                                                                  |
-| `copy.copy(c)`、`copy.deepcopy(c)` | 直接返回 `c` 自身，不创建新对象。                                                                                                                                                                             |
-| `pickle.loads(pickle.dumps(c))`    | 通过 [`_restore_currency`](#_restore_currency) 还原：若 `code` 已注册且定义一致，直接返回注册表中的同一单例（`is` 恒等）；若与注册表定义冲突则抛 `ValueError`；若未注册则还原为独立实例且不会自动写入注册表。 |
+| 操作                               | 行为与语义                                                                                                                                                                                                                                                                         |
+|------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `c1 == c2`、`c1 != c2`             | 仅比较量纲核心字段 `(code, digits)`；展示字段 `symbol` 与 `name` 不影响相等性。因此同代码但不同 `digits` 的未注册币种（如 `Currency("XYZ", 2)` 与 `Currency("XYZ", 3)`）绝不相等，对应的 `Money` 也不能相加减。与非 `Currency` 对象（如字符串 `"USD"`）比较返回 `False` / `True`。 |
+| `hash(c)`                          | 基于 `hash(c.code)` 计算，可安全作为 `dict` 键或放入 `set`。                                                                                                                                                                                                                       |
+| `copy.copy(c)`、`copy.deepcopy(c)` | 直接返回 `c` 自身，不创建新对象。                                                                                                                                                                                                                                                  |
+| `pickle.loads(pickle.dumps(c))`    | 通过 [`_restore_currency`](#_restore_currency) 还原：若 `code` 已注册且定义一致，直接返回注册表中的同一单例（`is` 恒等）；若与注册表定义冲突则抛 `ValueError`；若未注册则还原为独立实例且不会自动写入注册表。                                                                      |
 
 ## API 速查表
 
-| 分类                     | 接口 / 常量                                                                                    | 功能说明                                                   |
-|--------------------------|------------------------------------------------------------------------------------------------|------------------------------------------------------------|
-| **货币定义与属性**       | [`Currency(code, digits, symbol="", name="")`](#currencycode-digits-symbol-name)               | 构造不可变的货币/资产量纲定义                              |
-|                          | [`Currency.code`](#currencycode)                                                               | 标准化后的大写货币代码（3–5 个英文字母）                   |
-|                          | [`Currency.digits`](#currencydigits)                                                           | 最小原子结算单位对应的小数位数（`0`–`18`）                 |
-|                          | [`Currency.symbol`](#currencysymbol)                                                           | 货币显示符号（如 `"$"`、`"¥"`）                            |
-|                          | [`Currency.name`](#currencyname)                                                               | 货币全称（如 `"US Dollar"`）                               |
-| **比较、序列化与展示**   | [`c1 == c2`、`c1 != c2`、`hash(c)`](#c1--c2c1--c2-与-hashc相等与哈希)                          | 基于 `(code, digits)` 的相等判断与哈希支持                 |
-|                          | [`copy`、`deepcopy`、`pickle`](#copydeepcopy-与-pickle单例保持与序列化)                        | 浅/深拷贝返回自身，反序列化自动归并至注册表单例            |
-|                          | [`str(c)`、`repr(c)`](#strc-与-reprc文本表示)                                                  | 代码文本输出与完整构造表达式展示                           |
-| **注册表与查找**         | [`CurrencyRegistry`](#currencyregistry)                                                        | 全局货币享元注册表类                                       |
-|                          | [`CurrencyRegistry.register`](#currencyregistryregister)                                       | 将 `Currency` 实例注册到全局注册表（冲突报错）             |
-|                          | [`CurrencyRegistry.get`](#currencyregistryget)                                                 | 按代码或实例获取货币单例（校验冲突）                       |
-|                          | [`CurrencyRegistry.has`](#currencyregistryhas)                                                 | 判断货币代码或实例是否已在注册表中                         |
-|                          | [`CurrencyRegistry.clear`](#currencyregistryclear)                                             | 清空自定义注册项并恢复 10 个内置默认币种                   |
-|                          | [`get_currency`](#get_currency)                                                                | 通用类型提升函数：将 `str` 或 `Currency` 解析为 `Currency` |
-| **内置币种常量**         | [`USD` `CNY` `EUR` `JPY` `GBP` `HKD` `AUD` `CAD` `CHF` `SGD`](#usdcnyeurjpygbphkdaudcadchfsgd) | 预注册的 10 种 ISO 4217 常用法定货币单例                   |
-| **内部辅助（私有 API）** | [`Currency._definition`](#currency_definition)                                                 | 返回完整定义四元组 `(code, digits, symbol, name)`          |
-|                          | [`_restore_currency`](#_restore_currency)                                                      | `pickle` 反序列化还原与注册表单例归并入口                  |
-|                          | [`_init_defaults`](#_init_defaults)                                                            | 初始化并注册 10 个内置法定货币常量                         |
+| 分类                     | 接口 / 常量                                                                                    | 功能说明                                                     |
+|--------------------------|------------------------------------------------------------------------------------------------|--------------------------------------------------------------|
+| **货币定义与属性**       | [`Currency(code, digits, symbol="", name="")`](#currencycode-digits-symbol-name)               | 构造不可变的货币/资产量纲定义                                |
+|                          | [`Currency.code`](#currencycode)                                                               | 标准化后的大写货币代码（3–5 个英文字母）                     |
+|                          | [`Currency.digits`](#currencydigits)                                                           | 最小原子结算单位对应的小数位数（`0`–`18`）                   |
+|                          | [`Currency.symbol`](#currencysymbol)                                                           | 货币显示符号（如 `"$"`、`"¥"`）                              |
+|                          | [`Currency.name`](#currencyname)                                                               | 货币全称（如 `"US Dollar"`）                                 |
+| **比较、序列化与展示**   | [`c1 == c2`、`c1 != c2`、`hash(c)`](#c1--c2c1--c2-与-hashc相等与哈希)                          | 基于 `(code, digits)` 的相等判断与哈希支持                   |
+|                          | [`copy`、`deepcopy`、`pickle`](#copydeepcopy-与-pickle单例保持与序列化)                        | 浅/深拷贝返回自身，反序列化自动归并至注册表单例              |
+|                          | [`str(c)`、`repr(c)`](#strc-与-reprc文本表示)                                                  | 代码文本输出与完整构造表达式展示                             |
+| **注册表与查找**         | [`CurrencyRegistry`](#currencyregistry)                                                        | 全局货币享元注册表类                                         |
+|                          | [`CurrencyRegistry.register`](#currencyregistryregister)                                       | 将 `Currency` 实例注册到全局注册表（冲突报错）               |
+|                          | [`CurrencyRegistry.get`](#currencyregistryget)                                                 | 按代码或实例获取货币单例（校验冲突）                         |
+|                          | [`CurrencyRegistry.has`](#currencyregistryhas)                                                 | 判断货币代码或实例是否已在注册表中                           |
+|                          | [`CurrencyRegistry.clear`](#currencyregistryclear)                                             | 清空自定义注册项并恢复 10 个内置默认币种                     |
+|                          | [`get_currency`](#get_currency)                                                                | 通用类型提升函数：将 `str` 或 `Currency` 解析为 `Currency`   |
+| **内置币种常量**         | [`USD` `CNY` `EUR` `JPY` `GBP` `HKD` `AUD` `CAD` `CHF` `SGD`](#usdcnyeurjpygbphkdaudcadchfsgd) | 预注册的 10 种 ISO 4217 常用法定货币单例                     |
+| **内部辅助（私有 API）** | [`_CODE_RE` 与 `_MAX_DIGITS`](#_code_re-与-_max_digits)                                        | 货币代码校验正则（`^[A-Z]{3,5}$`）与最大精度上限常量（`18`） |
+|                          | [`Currency._definition`](#currency_definition)                                                 | 返回完整定义四元组 `(code, digits, symbol, name)`            |
+|                          | [`_restore_currency`](#_restore_currency)                                                      | `pickle` 反序列化还原与注册表单例归并入口                    |
+|                          | [`_init_defaults`](#_init_defaults)                                                            | 初始化并注册 10 个内置法定货币常量                           |
 
 ## 货币定义与核心属性
 
-### Currency (code, digits, symbol="", name="")
+### `Currency(code, digits, symbol="", name="")`
 
 ```python
 class moneta.Currency(code, digits, symbol="", name="")
@@ -99,7 +102,7 @@ class moneta.Currency(code, digits, symbol="", name="")
 - **code** : *str* — 货币代码（如 `"CNY"`、`"USD"`、`"JPY"`、`"USDT"`）。首尾空白会被自动去除并统一转为大写，去除空白后必须为 3
   到 5 个 ASCII 英文字母（正则 `^[A-Z]{3,5}$`）。
 - **digits** : *int* — 最小原子结算单位对应的小数位数，满足 `0 <= digits <= 18`。支持 Python `int` 与 NumPy 整数（如
-  `np.int64`），拒绝 `bool` 与 `float`。
+  `np.int64`、`np.uint8`），拒绝 `bool` 与 `float`。
 - **symbol** : *str，默认 `""`* — 货币符号（如 `"¥"`、`"$"`、`"€"`）。
 - **name** : *str，默认 `""`* — 货币全称（如 `"Chinese Yuan"`）。若传入空字符串 `""`，则默认设为标准化后的 `code`。
 
@@ -113,20 +116,20 @@ class moneta.Currency(code, digits, symbol="", name="")
 
 - **TypeError** — `code`、`symbol` 或 `name` 不是 `str`；`digits` 是 `bool`、`float` 或其他非整数类型。
 - **ValueError** — `code` 去除空白后不是 3 到 5 个英文字母；`digits` 超出 `[0, 18]` 范围。
-- **AttributeError** — 构造后尝试对任何属性赋值或删除属性。
+- **AttributeError** — 构造后尝试对任何属性赋值（`setattr`）或删除属性（`delattr`）。
 
 **机制说明**
 
 构造器内部依次执行以下校验与初始化：
 
-1. 检查 `isinstance(code, str)`，执行 `normalized = code.strip().upper()` 并用预编译正则
-   `_CODE_RE = re.compile(r"^[A-Z]{3,5}$")` 校验格式。
+1. 检查 `isinstance(code, str)`，执行 `normalized = code.strip().upper()` 并用预编译正则 [
+   `_CODE_RE`](#_code_re-与-_max_digits) 校验格式。
 2. 先显式拦截 `isinstance(digits, (bool, np.bool_))`（因为 `bool` 是 `int` 子类，且旧版 NumPy 的 `np.bool_` 可通过
    `operator.index`），再通过 `operator.index(digits)` 将任意整数类型无损转为 Python `int`（同时拒绝 `float`），最后校验
-   `0 <= digits <= 18`。
+   `0 <= digits <= _MAX_DIGITS`。
 3. 校验 `symbol` 与 `name` 为 `str`，若 `name` 为空则回退为 `normalized`。
-4. 由于 `Currency.__setattr__` 已被重写为直接抛出 `AttributeError`，构造器内部通过 `object.__setattr__(self, ...)`
-   完成底层的只读绑定。
+4. 由于 `Currency.__setattr__` 与 `Currency.__delattr__` 均已被重写为直接抛出 `AttributeError`，构造器内部通过
+   `object.__setattr__(self, ...)` 完成底层的只读绑定。
 
 **示例**
 
@@ -142,7 +145,7 @@ Currency(code='BHD', digits=3, symbol='BD', name='Bahraini Dinar')
 ('USDT', 6, '', 'USDT')
 ```
 
-不可变性保护与非法参数拦截：
+不可变性保护（禁止修改或删除属性）与非法参数拦截：
 
 ```python
 >> > USD.digits = 4
@@ -154,6 +157,15 @@ last):
 AttributeError: Currency
 是不可变对象，禁止设置属性
 'digits'
+>> > del USD._digits
+Traceback(most
+recent
+call
+last):
+...
+AttributeError: Currency
+是不可变对象，禁止删除属性
+'_digits'
 >> > Currency("US", 2)
 Traceback(most
 recent
@@ -245,8 +257,8 @@ Currency.digits
 
 **机制说明**
 
-读取底层只读槽位 `self._digits`，恒为 `[0, 18]` 范围内的 Python `int`。当使用该币种构造上层 `Money` 对象时，`Money` 底层 [
-`FixedArray`](fixed_array.md) 的 `scale` 恒绑定为此 `digits`。
+读取底层只读槽位 `self._digits`，恒为 `[0, 18]` 范围内的 Python `int`。当使用该币种构造上层 [`Money`](money.md) 对象时，
+`Money` 底层 [`FixedArray`](fixed_array.md) 的 `scale` 恒绑定为此 `digits`。
 
 **返回值**
 
@@ -265,6 +277,7 @@ Currency.digits
 **另请参阅**
 
 - [`Currency.code`](#currencycode)
+- [`Money.scale`](money.md#继承自-unitarray-的数组属性)
 - [`FixedArray.scale`](fixed_array.md#fixedarrayscale)
 
 ### Currency.symbol
@@ -331,7 +344,7 @@ Currency.name
 
 ## 相等、哈希、序列化与文本协议
 
-### c1 == c2、c1 != c2 与 hash (c)（相等与哈希）
+### `c1 == c2`、`c1 != c2` 与 `hash(c)`（相等与哈希）
 
 ```python
 c1 == c2
@@ -360,11 +373,20 @@ hash(c)
 **示例**
 
 ```python
->>> from moneta import Currency, USD, CNY, get_currency
+>> > from moneta import Currency, Money, USD, CNY, get_currency
 >>> Currency("ABC", 2, "$", "Alpha") == Currency("abc", 2)  # symbol 与 name 不影响相等
 True
 >>> Currency("ABC", 2) == Currency("ABC", 3)  # digits 不同则不等
 False
+>> > Money(1, Currency("XYZ", 2)) + Money(1, Currency("XYZ", 3))  # 同代码但不同 digits 的未注册币种禁止混算
+Traceback(most
+recent
+call
+last):
+...
+TypeError: 币种不匹配: XYZ
+与
+XYZ
 >>> USD == "USD"  # 与字符串比较为 False
 False
 >>> len({USD, get_currency("usd"), Currency("USD", 2, "$", "US Dollar"), CNY})
@@ -423,7 +445,7 @@ False
 - [`_restore_currency`](#_restore_currency)
 - [`CurrencyRegistry`](#currencyregistry)
 
-### str (c) 与 repr (c)（文本表示）
+### `str(c)` 与 `repr(c)`（文本表示）
 
 ```python
 str(c)
@@ -573,17 +595,10 @@ CurrencyRegistry.get(code)
 
 **机制说明**
 
-```python
-if isinstance(code, Currency):
-    registered = _registry.get(code.code)
-    if registered is None:
-        return code  # 未注册的自定义 Currency 实例：原样放行
-    if registered._definition() != code._definition():
-        raise ValueError  # 拦截与注册表冲突的伪造实例（如 3 位小数的 USD）
-    return registered  # 归并到注册表单例
-elif isinstance(code, str):
-    return _registry[code.strip().upper()]  # 未找到时抛 KeyError
-```
+- 当 `code` 是 `Currency` 实例时：先在 `_registry` 中查找 `code.code`。若未注册则原样放行返回 `code`；若已注册则核对
+  `registered._definition() == code._definition()`，一致时返回注册表单例 `registered`，不一致时抛出 `ValueError`（拦截如
+  `Currency("USD", 3)` 之类的伪造实例）。
+- 当 `code` 是 `str` 时：执行 `code.strip().upper()` 后在 `_registry` 中查找，未找到则抛出 `KeyError`。
 
 **示例**
 
@@ -715,22 +730,34 @@ moneta.get_currency(cur)
 
 **机制说明**
 
-直接转发调用 `CurrencyRegistry.get(cur)`。上层 `Money`、`Price`、`ExchangeRate`、`Portfolio` 在接收用户传入的
-`currency="USD"` 或 `currency=USD` 参数时，统一通过此函数收口。
+直接转发调用 `CurrencyRegistry.get(cur)`。上层 [`Money`](money.md)、[`Price`](price.md)、`ExchangeRate`、`Portfolio`
+在接收用户传入的 `currency="USD"` 或 `currency=USD` 参数时，统一通过此函数收口。
 
 **示例**
 
 ```python
->> > from moneta import get_currency, CNY, EUR
->> > get_currency("cny") is CNY
+>> > from moneta import get_currency, Money, CNY, EUR, USD, Currency
+>> > get_currency("cny") is CNY and get_currency(EUR) is EUR
 True
->> > get_currency(EUR) is EUR
+>> > Money("10.00", "usd").currency is USD
 True
+>> > Money(1, Currency("USD", 3))  # 拒绝与注册表冲突的伪造 USD 实例
+Traceback(most
+recent
+call
+last):
+...
+ValueError: Currency(code='USD', digits=3, symbol='', name='USD')
+与注册表中的定义
+Currency(code='USD', digits=2, symbol='$', name='US Dollar')
+不一致
 ```
 
 **另请参阅**
 
 - [`CurrencyRegistry.get`](#currencyregistryget)
+- [`Money(values, currency)`](money.md#moneyvalues-currency)
+- [`Price(values, quote_currency, ...)`](price.md#pricevalues-quote_currency-base_unitshare-tick_sizenone-scalenone)
 
 ## 内置常用币种常量
 
@@ -767,6 +794,25 @@ True
 - [`CurrencyRegistry`](#currencyregistry)
 
 ## 内部辅助方法与函数（私有 API）
+
+### `_CODE_RE` 与 `_MAX_DIGITS`
+
+```python
+moneta.currency._CODE_RE = re.compile(r"^[A-Z]{3,5}$")
+moneta.currency._MAX_DIGITS = 18
+```
+
+- **`_CODE_RE`**：预编译正则表达式，要求标准化（`strip().upper()`）后的货币代码严格由 3 到 5 个大写 ASCII 英文字母组成；
+- **`_MAX_DIGITS = 18`**：`Currency.digits` 允许的最大小数位数上限（有符号 `int64` 尾数在 18
+  位小数下仍能精确表示约 $\pm 9.22$）。
+
+**示例**
+
+```python
+>> > from moneta.currency import _CODE_RE, _MAX_DIGITS
+>> > bool(_CODE_RE.match("USDT")), bool(_CODE_RE.match("US")), _MAX_DIGITS
+(True, False, 18)
+```
 
 ### Currency._definition
 
@@ -824,8 +870,8 @@ moneta.currency._restore_currency(code, digits, symbol, name)
 
 **机制说明**
 
-先构造临时实例 `restored = Currency(code, digits, symbol, name)`，再查询 `CurrencyRegistry._registry.get(restored.code)`：
-若未注册则直接返回 `restored`；若已注册且 `registered._definition() == restored._definition()` 则返回注册表单例
+先构造临时实例 `restored = Currency(code, digits, symbol, name)`，再查询 `CurrencyRegistry._registry.get(restored.code)`
+：若未注册则直接返回 `restored`；若已注册且 `registered._definition() == restored._definition()` 则返回注册表单例
 `registered`；否则抛出 `ValueError`。
 
 **示例**
