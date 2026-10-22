@@ -88,72 +88,42 @@ CNY
 
 ## API 速查表
 
-| 分类                     | 接口 / 运算符                                                                                                           | 功能说明                                                             |
-|--------------------------|-------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------|
-| **警告类**               | [`PrecisionLossWarning`](#precisionlosswarning)                                                                         | 精确输入超出目标精度并被舍入时发出的警告                             |
-| **抽象基类与扩展钩子**   | [`UnitArray`](#unitarray)                                                                                               | 带单位/量纲定点数张量的抽象基类（`ABC`）                             |
-|                          | [`UnitArray._create_like`](#unitarray_create_like)                                                                      | 抽象钩子：用新 `FixedArray` 构造同单位的当前子类实例                 |
-|                          | [`UnitArray._check_compatible`](#unitarray_check_compatible)                                                            | 抽象钩子：校验另一对象是否与当前实例量纲兼容                         |
-| **底层数据与数组属性**   | [`UnitArray.data`](#unitarraydata)                                                                                      | 底层 [`FixedArray`](fixed_array.md) 定点数张量实例                   |
-|                          | [`UnitArray.mantissa`](#unitarraymantissa)                                                                              | 底层只读 `int64` 整数尾数数组视图                                    |
-|                          | [`UnitArray.scale`](#unitarrayscale)                                                                                    | 全局十进制小数位数                                                   |
-|                          | [`UnitArray.shape`](#unitarrayshape) / [`ndim`](#unitarrayndim) / [`size`](#unitarraysize) / [`dtype`](#unitarraydtype) | 张量形状、维度数、元素总数、尾数数据类型（`int64`）                  |
-|                          | [`UnitArray.T`](#unitarrayt)                                                                                            | 反转全部轴并保持原单位的转置视图                                     |
-| **保单位算术与规约**     | [`+a`、`-a`](#a-与--a一元正负号)                                                                                        | 一元正号（返回自身）与逐元素取负（保持原单位）                       |
-|                          | [`abs(a)`](#absa绝对值)                                                                                                 | 逐元素绝对值（保持原单位）                                           |
-|                          | [`UnitArray.sum`](#unitarraysum)                                                                                        | 沿指定轴精确求和（保持原单位，支持 `np.sum` 转发）                   |
-|                          | [`UnitArray.is_zero`](#unitarrayis_zero)                                                                                | 逐元素或标量判断数值是否为 0                                         |
-| **比较运算**             | [`a == b`、`a != b`](#a--b-与-a--b相等性比较)                                                                           | 量纲兼容时逐元素判等；量纲不兼容或为裸数字时返回 `False` / `True`    |
-|                          | [`a < b`、`a <= b`、`a > b`、`a >= b`](#a--ba--ba--ba--b大小比较)                                                       | 量纲兼容时逐元素比较大小；量纲不兼容时抛出 `TypeError`               |
-| **形状与容器协议**       | [`UnitArray.reshape`](#unitarrayreshape)                                                                                | 不复制底层尾数改变张量形状（保持原单位）                             |
-|                          | [`UnitArray.transpose`](#unitarraytranspose)                                                                            | 按指定轴顺序置换张量维度（保持原单位）                               |
-|                          | [`a[key]`](#akey索引与切片)                                                                                             | 索引、切片、布尔掩码与花式索引（保持原单位）                         |
-|                          | [`len(a)`、`bool(a)`、`iter(a)`](#lenaboola-与-itera容器与真值协议)                                                     | 首维长度、单元素真值测试与按首维保单位迭代                           |
-| **导出与互操作**         | [`UnitArray.to_float`](#unitarrayto_float)                                                                              | 剥离单位导出为 `float` 标量或 `float64` 数组                         |
-|                          | [`UnitArray.to_decimal`](#unitarrayto_decimal)                                                                          | 剥离单位导出为 `Decimal` 标量或 `object` 数组                        |
-|                          | [`UnitArray.to_pandas`](#unitarrayto_pandas)                                                                            | 导出为 `pandas.Series` 或 `DataFrame`                                |
-|                          | [`UnitArray.to_polars`](#unitarrayto_polars)                                                                            | 导出为 `polars.Series`                                               |
-|                          | [`UnitArray.__array__` 与 NumPy 防护机制](#unitarrayarray-与-numpy-防护机制)                                            | 拦截隐式转 `ndarray` 与 `ufunc`，防止单位静默丢失                    |
-| **内部辅助（私有 API）** | [`UnitArray._as_factor`](#unitarray_as_factor)                                                                          | 校验无量纲数值白名单并转为 `FixedArray`                              |
-|                          | [`UnitArray._check_unit`](#unitarray_check_unit)                                                                        | 校验单位字符串非空并去除首尾空白                                     |
-|                          | [`UnitArray._compatible_or_none`](#unitarray_compatible_or_none)                                                        | 捕获 `_check_compatible` 异常并转为布尔返回值（供 `==` / `!=` 使用） |
-|                          | [`UnitArray._ordered`](#unitarray_ordered)                                                                              | 校验有序比较的操作数类型与量纲兼容性并分发比较函数                   |
+| 分类                     | 接口 / 运算符                                                                                                                                                                                                                                                                                                                 | 功能说明                                                             |
+|--------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------|
+| **抽象基类与扩展钩子**   | [`UnitArray`](#unitarray)                                                                                                                                                                                                                                                                                                     | 带单位/量纲定点数张量的抽象基类（`ABC`）                             |
+|                          | [`UnitArray._create_like`](#unitarray_create_like)                                                                                                                                                                                                                                                                            | 抽象钩子：用新 `FixedArray` 构造同单位的当前子类实例                 |
+|                          | [`UnitArray._check_compatible`](#unitarray_check_compatible)                                                                                                                                                                                                                                                                  | 抽象钩子：校验另一对象是否与当前实例量纲兼容                         |
+| **底层数据与数组属性**   | [`UnitArray.data`](#unitarraydata)                                                                                                                                                                                                                                                                                            | 底层 [`FixedArray`](fixed_array.md) 定点数张量实例                   |
+|                          | [`UnitArray.mantissa`](#unitarraymantissa)                                                                                                                                                                                                                                                                                    | 底层只读 `int64` 整数尾数数组视图（缺失位置为 0）                    |
+|                          | [`UnitArray.scale`](#unitarrayscale)                                                                                                                                                                                                                                                                                          | 全局十进制小数位数                                                   |
+|                          | [`UnitArray.shape`](#unitarrayshape) / [`ndim`](#unitarrayndim) / [`size`](#unitarraysize) / [`dtype`](#unitarraydtype)                                                                                                                                                                                                       | 张量形状、维度数、元素总数、尾数数据类型（`int64`）                  |
+|                          | [`UnitArray.T`](#unitarrayt)                                                                                                                                                                                                                                                                                                  | 反转全部轴并保持原单位的转置视图                                     |
+| **缺失值（NA）处理**     | [`UnitArray.isna`](#unitarrayisnaunitarrayisnullunitarraynotna-与-unitarraynotnull) / [`isnull`](#unitarrayisnaunitarrayisnullunitarraynotna-与-unitarraynotnull) / [`notna`](#unitarrayisnaunitarrayisnullunitarraynotna-与-unitarraynotnull) / [`notnull`](#unitarrayisnaunitarrayisnullunitarraynotna-与-unitarraynotnull) | 返回标记缺失位置或有效数值位置的布尔数组                             |
+|                          | [`UnitArray.fillna`](#unitarrayfillna)                                                                                                                                                                                                                                                                                        | 用兼容单位的同类对象或数值填充缺失位置（保持原单位）                 |
+|                          | [`UnitArray.dropna`](#unitarraydropna)                                                                                                                                                                                                                                                                                        | 丢弃 1 维向量中的缺失值（保持原单位）                                |
+| **保单位算术与规约**     | [`+a`、`-a`](#a-与--a一元正负号)                                                                                                                                                                                                                                                                                              | 一元正号（返回自身）与逐元素取负（保持原单位）                       |
+|                          | [`abs(a)`](#absa绝对值)                                                                                                                                                                                                                                                                                                       | 逐元素绝对值（保持原单位）                                           |
+|                          | [`UnitArray.sum`](#unitarraysum)                                                                                                                                                                                                                                                                                              | 沿指定轴精确求和（保持原单位，支持 `skipna=True` 与 `np.sum` 转发）  |
+|                          | [`UnitArray.is_zero`](#unitarrayis_zero)                                                                                                                                                                                                                                                                                      | 逐元素或标量判断数值是否为 0（缺失值不是 0）                         |
+| **比较运算**             | [`a == b`、`a != b`](#a--b-与-a--b相等性比较)                                                                                                                                                                                                                                                                                 | 量纲兼容时逐元素判等；量纲不兼容或为裸数字时返回 `False` / `True`    |
+|                          | [`a < b`、`a <= b`、`a > b`、`a >= b`](#a--ba--ba--ba--b大小比较)                                                                                                                                                                                                                                                             | 量纲兼容时逐元素比较大小；量纲不兼容时抛出 `TypeError`               |
+| **形状与容器协议**       | [`UnitArray.reshape`](#unitarrayreshape)                                                                                                                                                                                                                                                                                      | 不复制底层尾数改变张量形状（保持原单位）                             |
+|                          | [`UnitArray.transpose`](#unitarraytranspose)                                                                                                                                                                                                                                                                                  | 按指定轴顺序置换张量维度（保持原单位）                               |
+|                          | [`UnitArray.swapaxes`](#unitarrayswapaxes-与-unitarraysqueeze) / [`UnitArray.squeeze`](#unitarrayswapaxes-与-unitarraysqueeze)                                                                                                                                                                                                | 交换两个轴 / 移除长度为 1 的轴（保持原单位）                         |
+|                          | [`a[key]`](#akey索引与切片)                                                                                                                                                                                                                                                                                                   | 索引、切片、布尔掩码与花式索引（保持原单位）                         |
+|                          | [`len(a)`、`bool(a)`、`iter(a)`](#lenaboola-与-itera容器与真值协议)                                                                                                                                                                                                                                                           | 首维长度、单元素真值测试与按首维保单位迭代                           |
+| **导出与互操作**         | [`UnitArray.to_float`](#unitarrayto_float)                                                                                                                                                                                                                                                                                    | 剥离单位导出为 `float` 标量或 `float64` 数组                         |
+|                          | [`UnitArray.to_decimal`](#unitarrayto_decimal)                                                                                                                                                                                                                                                                                | 剥离单位导出为 `Decimal` 标量或 `object` 数组                        |
+|                          | [`UnitArray.to_pandas`](#unitarrayto_pandas)                                                                                                                                                                                                                                                                                  | 导出为 `pandas.Series` 或 `DataFrame`                                |
+|                          | [`UnitArray.to_polars`](#unitarrayto_polars)                                                                                                                                                                                                                                                                                  | 导出为 `polars.Series`                                               |
+|                          | [`UnitArray.__array__` 与 NumPy 防护机制](#unitarrayarray-与-numpy-防护机制)                                                                                                                                                                                                                                                  | 拦截隐式转 `ndarray` 与 `ufunc`，白名单分派 `__array_function__`     |
+| **内部辅助（私有 API）** | [`UnitArray._as_factor`](#unitarray_as_factor)                                                                                                                                                                                                                                                                                | 校验无量纲数值白名单并转为 `FixedArray`                              |
+|                          | [`UnitArray._as_grid`](#unitarray_as_grid-与-unitarray_fill_value) / [`UnitArray._fill_value`](#unitarray_as_grid-与-unitarray_fill_value)                                                                                                                                                                                    | 校验不含缺失值的网格参数 / 将 `fillna` 数值填充值换算为 `FixedArray` |
+|                          | [`UnitArray._check_unit`](#unitarray_check_unit)                                                                                                                                                                                                                                                                              | 校验单位字符串非空并去除首尾空白                                     |
+|                          | [`UnitArray._compatible_or_none`](#unitarray_compatible_or_none)                                                                                                                                                                                                                                                              | 捕获 `_check_compatible` 异常并转为布尔返回值（供 `==` / `!=` 使用） |
+|                          | [`UnitArray._ordered`](#unitarray_ordered)                                                                                                                                                                                                                                                                                    | 校验有序比较的操作数类型与量纲兼容性并分发比较函数                   |
 
-## 警告类与抽象基类契约
-
-### PrecisionLossWarning
-
-```python
-class moneta.PrecisionLossWarning(UserWarning)
-```
-
-当构造带量纲张量（如 [`Money`](money.md) 或显式指定 `scale` 的 [`Quantity`](quantity.md)）时，非浮点数的精确输入（`str`、
-`Decimal`、`Fraction`、`FixedArray` 等）小数位数超过目标精度、被自动按 `half_up` 舍入时发出的警告。
-
-**机制说明**
-
-继承自内置 `UserWarning`。浮点数（`float` / `float64` 数组）因本身属于二进制近似值，在构造时直接按最短写法 `half_up`
-静默舍入而不触发此警告；精确十进制输入超出目标精度时则会先发出 `PrecisionLossWarning` 再舍入。可通过
-`warnings.simplefilter("error", PrecisionLossWarning)` 将其升级为异常。
-
-**示例**
-
-```python
->> > import warnings
->> > from moneta import Money, Quantity, PrecisionLossWarning
->> > with warnings.catch_warnings(record=True) as w:
-    ...
-warnings.simplefilter("always")
-...
-q = Quantity("1.25", scale=1)
-...(q, len(w), issubclass(w[0].category, PrecisionLossWarning))
-(Quantity(FixedArray(1.3, scale=1), unit='share'), 1, True)
-```
-
-**另请参阅**
-
-- [`Money(values, currency)`](money.md#moneyvalues-currency)
-- [`Quantity(values, unit="share", scale=None)`](quantity.md#quantityvalues-unitshare-scalenone)
+## 抽象基类契约
 
 ### UnitArray
 
@@ -194,11 +164,7 @@ call
 last):
     ...
 TypeError: Can
-'t instantiate abstract class UnitArray without an implementation for abstract methods '
-_check_compatible
-', '
-_create_like
-'
+'t instantiate abstract class UnitArray ...
 >> >
 
 class PartialUnit(UnitArray):
@@ -219,9 +185,7 @@ call
 last):
 ...
 TypeError: Can
-'t instantiate abstract class PartialUnit without an implementation for abstract method '
-_check_compatible
-'
+'t instantiate abstract class PartialUnit ...
 ```
 
 只需实现两个抽象钩子即可定义完整的自定义带单位张量类：
@@ -316,8 +280,10 @@ UnitArray._create_like(new_data)
 - **[`Money._create_like(new_data)`](money.md#money_create_like)**：调用 [
   `Money._wrap(new_data, self._currency)`](money.md#money_wrap) 校验 `new_data.scale == self._currency.digits` 并零拷贝构造同币种
   `Money`；
-- **`Price._create_like(new_data)`**：返回携带相同 `quote_currency`、`base_unit` 与 `tick_size` 的新 [`Price`](price.md)；
-- **`Quantity._create_like(new_data)`**：返回携带相同 `unit` 的新 [`Quantity`](quantity.md)。
+- **[`Price._create_like(new_data)`](price.md#price_create_like)**：返回携带相同 `quote_currency`、`base_unit` 与
+  `tick_size` 的新 [`Price`](price.md)；
+- **[`Quantity._create_like(new_data)`](quantity.md#quantity_create_like)**：返回携带相同 `unit` 的新 [
+  `Quantity`](quantity.md)。
 
 **示例**
 
@@ -366,8 +332,10 @@ UnitArray._check_compatible(other)
 
 - **[`Money._check_compatible(other)`](money.md#money_check_compatible)**：要求 `isinstance(other, Money)` 且
   `self._currency == other._currency`；
-- **`Price._check_compatible(other)`**：要求 `isinstance(other, Price)` 且 `quote_currency` 与 `base_unit` 均相同；
-- **`Quantity._check_compatible(other)`**：要求 `isinstance(other, Quantity)` 且单位相同（或其中一方为通配单位 `"Any"`）。
+- **[`Price._check_compatible(other)`](price.md#price_check_compatible)**：要求 `isinstance(other, Price)` 且
+  `quote_currency` 相同、`base_unit` 兼容；
+- **[`Quantity._check_compatible(other)`](quantity.md#quantity_check_compatible)**：要求 `isinstance(other, Quantity)`
+  且单位相同（或其中一方为通配单位 `"Any"`）。
 
 **示例**
 
@@ -654,6 +622,100 @@ Length(FixedArray([[1, 3],
 - [`UnitArray.transpose`](#unitarraytranspose)
 - [`UnitArray.reshape`](#unitarrayreshape)
 
+## 缺失值（NA）处理
+
+### `UnitArray.isna`、`UnitArray.isnull`、`UnitArray.notna` 与 `UnitArray.notnull`
+
+```python
+UnitArray.isna()
+UnitArray.isnull()
+UnitArray.notna()
+UnitArray.notnull()
+```
+
+返回标记缺失位置（`isna` / `isnull`）或有效数值位置（`notna` / `notnull`）的布尔 NumPy 数组（0 维标量时返回 0
+维布尔数组）。直接委托给底层 [
+`FixedArray.isna()`](fixed_array.md#fixedarrayisnafixedarrayisnullfixedarraynotna-与-fixedarraynotnull) 与 `notna()`。
+
+**示例**
+
+```python
+>>> m = Money(["10.50", None, "20.00"], "USD")
+>>> m.isna().tolist(), m.notna().tolist()
+([False, True, False], [True, False, True])
+>>> bool((m.isnull() == m.isna()).all() and (m.notnull() == m.notna()).all())
+True
+```
+
+**另请参阅**
+
+- [`UnitArray.fillna`](#unitarrayfillna)、[`UnitArray.dropna`](#unitarraydropna)
+
+### UnitArray.fillna
+
+```python
+UnitArray.fillna(value)
+```
+
+用同类对象（量纲须兼容）或数值填充缺失位置，结果保持原单位。
+
+**参数**
+
+- **value** : *UnitArray 或 数值（int, float, Decimal, Fraction, FixedArray, 数值数组）* — 填充值。若为 `UnitArray`
+  实例，会先调用 [`_check_compatible(value)`](#unitarray_check_compatible) 校验单位兼容性；若为无量纲数值，则通过钩子 [
+  `_fill_value(value)`](#unitarray_as_grid-与-unitarray_fill_value) 按当前子类的构造规则换算为 `FixedArray`（例如 [
+  `Money`](money.md) 会将数值换算到币种精度，精确输入超出精度时发出 [
+  `PrecisionLossWarning`](fixed_array.md#precisionlosswarning)）。
+
+**返回值**
+
+- **out** : *UnitArray* — 填充缺失位置后的同单位实例。
+
+**异常**
+
+- **TypeError** — `value` 为不兼容单位的 `UnitArray`，或不属于数值白名单（如字符串、布尔值）。
+- **ValueError** — `value` 在需要填充的位置上本身也是缺失值。
+
+**示例**
+
+```python
+>>> m = Money(["10.50", None, "20.00"], "USD")
+>>> m.fillna(0)
+Money(FixedArray([10.50, 0.00, 20.00], scale=2), currency='USD')
+>>> m.fillna(Money("99.99", "USD"))
+Money(FixedArray([10.50, 99.99, 20.00], scale=2), currency='USD')
+>>> m.fillna(Money("99.99", "CNY"))
+Traceback (most recent call last):
+    ...
+TypeError: 币种不匹配: USD 与 CNY
+```
+
+**另请参阅**
+
+- [`UnitArray.isna`](#unitarrayisnaunitarrayisnullunitarraynotna-与-unitarraynotnull)、[
+  `UnitArray.dropna`](#unitarraydropna)
+- [`UnitArray._fill_value`](#unitarray_as_grid-与-unitarray_fill_value)
+
+### UnitArray.dropna
+
+```python
+UnitArray.dropna()
+```
+
+丢弃 1 维向量中的缺失值，结果保持原单位。仅限 1 维张量（`ndim == 1`），其他维度抛出 `ValueError`。
+
+**示例**
+
+```python
+>>> Money(["10.50", None, "20.00"], "USD").dropna()
+Money(FixedArray([10.50, 20.00], scale=2), currency='USD')
+```
+
+**另请参阅**
+
+- [`UnitArray.fillna`](#unitarrayfillna)
+- [`FixedArray.dropna`](fixed_array.md#fixedarraydropna)
+
 ## 保单位算术与规约运算
 
 ### +a 与 -a（一元正负号）
@@ -714,7 +776,7 @@ int64
 - [`abs(a)`](#absa绝对值)
 - [`FixedArray` 一元正负号](fixed_array.md#a-与--a一元正负号)
 
-### abs (a)（绝对值）
+### `abs(a)`（绝对值）
 
 ```python
 abs(a)
@@ -770,7 +832,7 @@ ufuncs(__array_ufunc__=None)
 ### UnitArray.sum
 
 ```python
-UnitArray.sum(axis=None, keepdims=False, out=None, dtype=None)
+UnitArray.sum(axis=None, keepdims=False, skipna=True, out=None, dtype=None)
 ```
 
 沿指定轴对张量元素精确求和，结果保持原单位与原 `scale`。
@@ -779,6 +841,8 @@ UnitArray.sum(axis=None, keepdims=False, out=None, dtype=None)
 
 - **axis** : *int 或 tuple of int，可选* — 求和所沿的轴。默认 `None` 时对全部元素求和并返回 0 维同单位标量。
 - **keepdims** : *bool，默认 `False`* — 为 `True` 时保留被规约的轴（长度为 1）。
+- **skipna** : *bool，默认 `True`* — 是否忽略缺失值 `<NA>`。为 `True` 时缺失位置按 `0` 处理；为 `False` 时若求和切片中含有
+  `<NA>`，该切片结果为 `<NA>`。
 - **out** : *None* — 兼容 `np.sum(a)` 签名预留，必须为 `None`（不支持原地输出）。
 - **dtype** : *None* — 兼容 `np.sum(a)` 签名预留，必须为 `None`（禁止指定 `dtype` 改变定点数类型）。
 
@@ -793,13 +857,13 @@ UnitArray.sum(axis=None, keepdims=False, out=None, dtype=None)
 
 **机制说明**
 
-内部执行 `self._create_like(self._data.sum(axis=axis, keepdims=keepdims, out=out, dtype=dtype))`：
+内部执行 `self._create_like(self._data.sum(axis=axis, keepdims=keepdims, skipna=skipna, out=out, dtype=dtype))`：
 
 - 底层直接复用 [`FixedArray.sum`](fixed_array.md#fixedarraysum) 的快慢双路径：当最坏上界 `max(|m|) * count <= 2^63 - 1`
-  时直接走 `np.sum` 快路径；当最坏上界可能越界时自动切换为 Base $10^9$ 三块精确累加，哪怕中间部分和越界、只要最终正负相抵后在
-  `int64` 范围内就不会误报溢出。
-- 由于签名兼容 `out=None, dtype=None`，调用 `np.sum(a, axis=..., keepdims=...)` 会自动转发到此方法并返回带原单位的
-  `UnitArray` 子类实例。
+  时直接走 `np.sum` 快路径；当最坏上界可能越界时自动切换为 [`limbs_sum`](_limbs.md#limbs_sum)（Base $2^{21}$
+  三块精确累加），哪怕中间部分和越界、只要最终正负相抵后在 `int64` 范围内就不会误报溢出。
+- 由于实现了 `__array_function__` 并兼容 `out=None, dtype=None`，调用 `np.sum(a, axis=..., keepdims=...)`
+  会自动转发到此方法并返回带原单位的 `UnitArray` 子类实例。
 
 **示例**
 
@@ -814,6 +878,9 @@ Length(FixedArray([[3.50],
                    [7.25]], scale=2), unit='km')
 >> > np.sum(a)  # np.sum 自动转发并保留单位
 Length(FixedArray(10.75, scale=2), unit='km')
+>> > m_na = Money(["1.50", None, "2.50"], "USD")
+>> > m_na.sum(), m_na.sum(skipna=False)
+(Money(FixedArray(4.00, scale=2), currency='USD'), Money(FixedArray( < NA >, scale=2), currency='USD'))
 ```
 
 中间和超过 `int64` 上限但正负相抵后未越界时仍能精确求和：
@@ -838,7 +905,7 @@ TypeError: FixedArray.sum 不支持 out、dtype；要 float 请先 to_float()
 **另请参阅**
 
 - [`FixedArray.sum`](fixed_array.md#fixedarraysum)
-- [`FixedArray._chunked_sum`](fixed_array.md#fixedarray_chunked_sum)
+- [`limbs_sum`](_limbs.md#limbs_sum)
 
 ### UnitArray.is_zero
 
@@ -1130,7 +1197,27 @@ Length(FixedArray([[1, 4],
 - [`UnitArray.reshape`](#unitarrayreshape)
 - [`FixedArray.transpose`](fixed_array.md#fixedarraytranspose)
 
-### a[key]（索引与切片）
+### `UnitArray.swapaxes` 与 `UnitArray.squeeze`
+
+```python
+UnitArray.swapaxes(axis1, axis2)
+UnitArray.squeeze(axis=None)
+```
+
+- **`swapaxes(axis1, axis2)`**：交换两个轴并保持原单位（委托 [
+  `FixedArray.swapaxes`](fixed_array.md#fixedarrayswapaxes-与-fixedarraysqueeze)）。
+- **`squeeze(axis=None)`**：移除长度为 1 的轴并保持原单位（委托 [
+  `FixedArray.squeeze`](fixed_array.md#fixedarrayswapaxes-与-fixedarraysqueeze)）。
+
+**示例**
+
+```python
+>>> a = Money(np.arange(6).reshape(1, 2, 3), "USD")
+>>> a.swapaxes(0, 2).shape, a.squeeze().shape
+((3, 2, 1), (2, 3))
+```
+
+### `a[key]`（索引与切片）
 
 ```python
 a[key]
@@ -1172,7 +1259,7 @@ Length(FixedArray([20, 30], scale=0), unit='km')
 - [`len(a)`、`bool(a)` 与 `iter(a)`](#lenaboola-与-itera容器与真值协议)
 - [`FixedArray` 索引与切片](fixed_array.md#akey索引与切片)
 
-### len (a)、bool (a) 与 iter (a)（容器与真值协议）
+### `len(a)`、`bool(a)` 与 `iter(a)`（容器与真值协议）
 
 ```python
 len(a)
@@ -1359,7 +1446,7 @@ UnitArray.to_polars(name="value", as_float=True)
 
 **异常**
 
-- **ValueError** — `ndim != 1`。
+- **ValueError** — `ndim > 1`。
 - **ImportError** — 当前环境未安装 `polars`。
 
 **机制说明**
@@ -1377,34 +1464,38 @@ UnitArray.to_polars(name="value", as_float=True)
 - [`UnitArray.to_pandas`](#unitarrayto_pandas)
 - [`FixedArray.to_polars`](fixed_array.md#fixedarrayto_polars)
 
-### UnitArray. __array__ 与 NumPy 防护机制
+### `UnitArray.__array__` 与 NumPy 防护机制
 
 ```python
 UnitArray.__array__(dtype=None, copy=None)
+UnitArray.__array_function__(func, types, args, kwargs)
 UnitArray.__array_ufunc__ = None
 ```
 
-显式拦截 `np.asarray(a)`、`np.array(a)` 等隐式数组转换以及所有 NumPy `ufunc` 调用。
+显式拦截 `np.asarray(a)`、`np.array(a)` 等隐式数组转换以及所有 NumPy `ufunc` 调用，同时通过 `__array_function__`
+仅放行白名单内的安全 NumPy 函数。
 
 **参数**
 
-- **dtype** : *Any，默认 `None`* — 兼容 NumPy `__array__` 协议签名。
-- **copy** : *Any，默认 `None`* — 兼容 NumPy 2.0+ `__array__` 协议签名。
+- **dtype / copy** : *Any，默认 `None`* — 兼容 NumPy `__array__` 协议签名。
 
 **异常**
 
-- **TypeError** — 任何调用 `__array__` 或 NumPy `ufunc` 的操作均无条件抛出 `TypeError`。
+- **TypeError** — 任何调用 `__array__`、NumPy `ufunc` 或非白名单 NumPy 函数（如 `np.concatenate`、`np.max`）的操作均无条件抛出
+  `TypeError`。
 
 **机制说明**
 
-如果允许 `np.asarray(a)` 或 `np.add(a, b)` 退回默认行为，NumPy 会通过 `iter(a)` 将 `UnitArray` 拆解为元素是 `UnitArray`
-标量的 `dtype=object` 数组，或者在转为 `float64` 时静默丢失单位与定点精度。
-为此，`UnitArray` 采取双保险防护：
+如果允许 `np.asarray(a)`、`np.add(a, b)` 或未受控的 NumPy 高阶函数退回默认行为，NumPy 会将 `UnitArray` 拆解为
+`dtype=object` 数组或静默丢失单位。为此，`UnitArray` 采取三道防护：
 
 1. **`__array_ufunc__ = None`**：阻止一切 `np.add`、`np.multiply`、`np.sqrt` 以及左操作数为 `ndarray`
    的算术运算（除非子类自身专门实现了对应的反向运算）；
-2. **`__array__` 抛 `TypeError`**：阻止 `np.asarray(a)`、`np.concatenate([a, a])` 等隐式转换，并在报错消息中明确提示子类名与替代方案：
-   `"{SubclassName} 不能隐式转成数组：要 float 请用 to_float()，要整数尾数请用 .mantissa"`。
+2. **`__array__` 抛 `TypeError`**：阻止 `np.asarray(a)` 等隐式转换，并在报错消息中明确提示子类名与替代方案；
+3. **`__array_function__` 白名单分派**：调用 [
+   `FixedArray._array_function`](fixed_array.md#fixedarray_array_function-与-fixedarray_numpy_equal)，仅允许 `np.sum`、
+   `np.mean`、`np.transpose`、`np.shape`、`np.ndim`、`np.size`、`np.array_equal` 与 `np.array_equiv`，其余函数一律抛出
+   `TypeError`。
 
 **示例**
 
@@ -1422,6 +1513,8 @@ TypeError: operand 'Length' does not support ufuncs (__array_ufunc__=None)
 Traceback (most recent call last):
     ...
 TypeError: operand 'Length' does not support ufuncs (__array_ufunc__=None)
+>> > np.array_equal(a, Length(["1.0", "2.0"], "m"))
+True
 ```
 
 **另请参阅**
@@ -1436,8 +1529,6 @@ TypeError: operand 'Length' does not support ufuncs (__array_ufunc__=None)
 
 ```python
 @staticmethod
-
-
 UnitArray._as_factor(other, what)
 ```
 
@@ -1460,7 +1551,7 @@ UnitArray._as_factor(other, what)
 
 内部直接调用 [`FixedArray._coerce(other, strict=False)`](fixed_array.md#fixedarray_coerce)：若返回 `None`
 （不在数值白名单内），则抛出带有业务角色名 `what` 的 `TypeError`；否则返回转换后的 `FixedArray`。供 [`Money`](money.md)、[
-`Quantity`](quantity.md) 等子类的乘除与步长对齐方法复用。
+`Price`](price.md)、[`Quantity`](quantity.md) 等子类的乘除与步长对齐方法复用。
 
 **示例**
 
@@ -1483,12 +1574,41 @@ str
 - [`FixedArray._is_numeric_operand`](fixed_array.md#fixedarray_is_numeric_operand)
 - [`FixedArray._coerce`](fixed_array.md#fixedarray_coerce)
 
+### `UnitArray._as_grid` 与 `UnitArray._fill_value`
+
+```python
+@classmethod
+
+
+UnitArray._as_grid(step, what)
+
+UnitArray._fill_value(value)
+```
+
+- **`_as_grid(step, what)`**：供步长 `step`、`tick_size` 等网格参数复用的校验方法——先调用 [
+  `_as_factor(step, what)`](#unitarray_as_factor) 转为 `FixedArray`，再检查 `grid.mask is not None`，若含缺失值则抛出
+  `ValueError(f"{what}不能是缺失值")`。
+- **`_fill_value(value)`**：将 [`fillna(value)`](#unitarrayfillna) 传入的无量纲数值填充值换算为 `FixedArray` 的钩子。基类默认直接调用
+  `self._as_factor(value, "填充值")`；具有固定精度的子类（如 [`Money._fill_value`](money.md#money_fill_value)
+  ）会覆盖此方法，按子类构造规则换算精度。
+
+**示例**
+
+```python
+>>> UnitArray._as_grid("0.05", "步长")
+Traceback (most recent call last):
+    ...
+TypeError: 步长只接受数值（int、float、Decimal、Fraction、FixedArray 或数值数组），收到 str
+>>> UnitArray._as_grid(FixedArray(None), "步长")
+Traceback (most recent call last):
+    ...
+ValueError: 步长不能是缺失值
+```
+
 ### UnitArray._check_unit
 
 ```python
 @staticmethod
-
-
 UnitArray._check_unit(unit)
 ```
 

@@ -8,17 +8,17 @@
 模块同时提供通配单位常量 [`WILDCARD_UNIT = "Any"`](#wildcard_unit)，可与任意具体单位运算并自动收敛为该具体单位。
 
 ```python
->> > from decimal import Decimal
->> > from moneta import Quantity, Price, Money
->> > from moneta.quantity import WILDCARD_UNIT
->> > q = Quantity([150, 240, 380], unit="share")
->> > q.unit, q.scale, q.mantissa.tolist()
+>>> from decimal import Decimal
+>>> from moneta import Quantity, Price, Money
+>>> from moneta.quantity import WILDCARD_UNIT
+>>> q = Quantity([150, 240, 380], unit="share")
+>>> q.unit, q.scale, q.mantissa.tolist()
 ('share', 0, [150, 240, 380])
->> > q * Decimal("1.5")  # 乘法默认精确，scale = 0 + 1 = 1
+>>> q * Decimal("1.5")  # 乘法默认精确，scale = 0 + 1 = 1
 Quantity(FixedArray([225.0, 360.0, 570.0], scale=1), unit='share')
->> > q.round_to_step(100, rounding="down")  # 按每手 100 股向下取整
+>>> q.round_to_step(100, rounding="down")  # 按每手 100 股向下取整
 Quantity(FixedArray([100, 200, 300], scale=0), unit='share')
->> > Quantity(10, "share") * Price("189.50", "USD", base_unit="share")
+>>> Quantity(10, "share") * Price("189.50", "USD", base_unit="share")
 Money(FixedArray(1895.00, scale=2), currency='USD')
 ```
 
@@ -34,9 +34,11 @@ Money(FixedArray(1895.00, scale=2), currency='USD')
 
 1. **构造时自动推断或按显式 `scale` 对齐**：
     - `scale=None`（默认）时，保留输入数值自身的十进制小数位数（如 `100` 为 `0`，`"1.50"` 为 `2`，`Fraction(1, 8)` 为 `3`）；
-    - 显式传入 `scale` 时：浮点数（`float` 及浮点数组）按最短十进制写法以 `half_up` 静默舍入到 `scale`；精确输入（`str`、
-      `Decimal`、`Fraction`、`FixedArray` 等）若小数位数超过 `scale`，会先发出 [
-      `PrecisionLossWarning`](unit_array.md#precisionlosswarning) 警告，再按 `half_up` 舍入到 `scale`；位数不足时补尾随零。
+   - 显式传入 `scale` 时：内部委托 `FixedArray(data, scale=scale, on_excess="warn")`，浮点数（`float` 及浮点数组）按最短十进制写法以
+     `half_up` 静默舍入到 `scale`；精确输入（`str`、
+     `Decimal`、`Fraction`、`FixedArray` 等）若在超出 `scale` 的小数位上含有非零数字（缺失位置与末尾多余的 `0` 除外），由
+     `FixedArray` 先发出 [
+     `PrecisionLossWarning`](fixed_array.md#precisionlosswarning) 警告，再按 `half_up` 舍入到 `scale`；位数不足时补尾随零。
 2. **算术运算的 `scale` 传播**：
 
 | 运算                                                       | 另一操作数类型                 | 返回类型                       | 结果 `scale` 与舍入规则                                                     |
@@ -92,7 +94,7 @@ Money(FixedArray(1895.00, scale=2), currency='USD')
 
 ## 构造、常量与核心属性
 
-### Quantity (values, unit="share", scale=None)
+### `Quantity(values, unit="share", scale=None)`
 
 ```python
 class moneta.Quantity(values, unit="share", scale=None)
@@ -106,8 +108,8 @@ class moneta.Quantity(values, unit="share", scale=None)
 - **unit** : *str，默认 `"share"`* — 标的物单位（如 `"share"`、`"barrel"`、`"contract"`、`"BTC"` 或 `"Any"`
   ）。首尾空白会被自动去除，区分大小写，不能为空。
 - **scale** : *int，可选* — 目标小数位数（非负整数）。默认 `None` 时保留 `values` 自身的推断精度；显式指定时，浮点数按最短十进制写法
-  `half_up` 静默舍入，精确输入若小数位数超过 `scale` 则先发出 [
-  `PrecisionLossWarning`](unit_array.md#precisionlosswarning) 再按 `half_up` 舍入，位数不足时补零。
+  `half_up` 静默舍入，精确输入若在超出 `scale` 的小数位上含有非零数字（缺失位置与末尾多余的 `0` 除外）则先发出 [
+  `PrecisionLossWarning`](fixed_array.md#precisionlosswarning) 再按 `half_up` 舍入，位数不足时补零。
 
 **返回值**
 
@@ -116,70 +118,60 @@ class moneta.Quantity(values, unit="share", scale=None)
 **异常**
 
 - **TypeError** — `unit` 不是 `str`；或 `values` 是不兼容单位的 `Quantity`（当两侧均不为 `"Any"` 且单位不同时）；或 `values`
-  是 `bool`/`None` 等非法类型。
-- **ValueError** — `unit` 去除首尾空白后为空字符串；或 `scale` 不是非负整数（如负数、`float`、`bool`）；或输入包含 `NaN`/`Inf`
+  是 `bool` 等非法类型。
+- **ValueError** — `unit` 去除首尾空白后为空字符串；或 `scale` 不是非负整数（如负数、`float`、`bool`）；或输入包含 `Inf`
   、无限小数 `Fraction` 等。
 - **OverflowError** — 底层整数尾数超出 `int64` 范围。
 
 **警告**
 
-- **[`PrecisionLossWarning`](unit_array.md#precisionlosswarning)** — 当显式指定 `scale` 且非浮点的精确输入（`str`、
-  `Decimal`、`Fraction`、`FixedArray` 等）小数位数大于 `scale` 时发出。
+- **[`PrecisionLossWarning`](fixed_array.md#precisionlosswarning)** — 当显式指定 `scale` 且非浮点的精确输入（`str`、
+  `Decimal`、`Fraction`、`FixedArray` 等）在超出 `scale` 的小数位上含有非零数字时发出。
 
 **机制说明**
 
 1. 先调用 [`_check_unit(unit)`](unit_array.md#unitarray_check_unit) 校验 `isinstance(unit, str)` 并执行 `.strip()`；
 2. 若 `values` 是 `Quantity`：检查 `WILDCARD_UNIT not in (values._unit, unit) and values._unit != unit`，不兼容则抛
-   `TypeError`，兼容则取 `data = values._data` 并更新为单位 `unit`（可将 `"Any"` 数量窄化为具体单位）；
-3. 若 `values` 是 `FixedArray`：直接取 `data = values`；
-4. 若指定了 `scale is not None` 且 `values` 是浮点数（`dtype.kind == "f"`）：直接调用 `FixedArray(values, scale=scale)`
-   按最短写法 `half_up` 舍入；
-5. 其他情况先调用 `FixedArray(values)`；若指定了 `scale`，校验 `FixedArray._check_scale(scale)`，当 `data.scale > scale`
-   时发出 `PrecisionLossWarning`，随后执行 `data.rescale(scale, "half_up")`。
+   `TypeError`，兼容则取 `data = values._data`（可将 `"Any"` 数量窄化为具体单位）；否则取 `data = values`；
+3. 直接调用 `self._data = FixedArray(data, scale=scale, on_excess="warn")`：指定 `scale` 时浮点数静默舍入，精确输入丢精度时由
+   `FixedArray` 发出 [`PrecisionLossWarning`](fixed_array.md#precisionlosswarning) 后按 `half_up` 舍入。
 
 **示例**
 
 自动推断精度与显式指定 `scale`：
 
 ```python
->> > import warnings
->> > from decimal import Decimal
->> > from fractions import Fraction
->> > from moneta import Quantity, PrecisionLossWarning
->> > Quantity(100)
+>>> import warnings
+>>> from decimal import Decimal
+>>> from fractions import Fraction
+>>> from moneta import Quantity, PrecisionLossWarning
+>>> Quantity(100)
 Quantity(FixedArray(100, scale=0), unit='share')
->> > Quantity("1.50", unit="  barrel ")
+>>> Quantity("1.50", unit="  barrel ")
 Quantity(FixedArray(1.50, scale=2), unit='barrel')
->> > Quantity(Fraction(1, 8), unit="BTC")
+>>> Quantity(Fraction(1, 8), unit="BTC")
 Quantity(FixedArray(0.125, scale=3), unit='BTC')
->> > Quantity(1.5, scale=0)  # float 指定 scale 时静默按最短写法 half_up 舍入
+>>> Quantity(1.5, scale=0)  # float 指定 scale 时静默按最短写法 half_up 舍入
 Quantity(FixedArray(2, scale=0), unit='share')
->> > Quantity("1.5", scale=4)  # 位数不足时自动补零
+>>> Quantity("1.5", scale=4)  # 位数不足时自动补零
 Quantity(FixedArray(1.5000, scale=4), unit='share')
->> > with warnings.catch_warnings(record=True) as w:
-    ...
-warnings.simplefilter("always")
-...
-q = Quantity(Decimal("1.25"), scale=1)
-...(q, len(w), issubclass(w[0].category, PrecisionLossWarning))
+>>> with warnings.catch_warnings(record=True) as w:
+...     warnings.simplefilter("always")
+...     q = Quantity(Decimal("1.25"), scale=1)
+...     (q, len(w), issubclass(w[0].category, PrecisionLossWarning))
 (Quantity(FixedArray(1.3, scale=1), unit='share'), 1, True)
 ```
 
 从已有 `Quantity` 构造与通配单位具体化：
 
 ```python
->> > q_any = Quantity(5, unit="Any")
->> > Quantity(q_any, unit="barrel")
+>>> q_any = Quantity(5, unit="Any")
+>>> Quantity(q_any, unit="barrel")
 Quantity(FixedArray(5, scale=0), unit='barrel')
->> > Quantity(Quantity(5, unit="barrel"), unit="share")
-Traceback(most
-recent
-call
-last):
-...
-TypeError: 单位不匹配: barrel
-与
-share
+>>> Quantity(Quantity(5, unit="barrel"), unit="share")
+Traceback (most recent call last):
+    ...
+TypeError: 单位不匹配: barrel 与 share
 ```
 
 **性能对比**
@@ -207,15 +199,15 @@ moneta.quantity.WILDCARD_UNIT = "Any"
 **示例**
 
 ```python
->> > from moneta import Quantity, Price
->> > from moneta.quantity import WILDCARD_UNIT
->> > a = Quantity(3, unit=WILDCARD_UNIT)
->> > b = Quantity(2, unit="barrel")
->> > a + b
+>>> from moneta import Quantity, Price
+>>> from moneta.quantity import WILDCARD_UNIT
+>>> a = Quantity(3, unit=WILDCARD_UNIT)
+>>> b = Quantity(2, unit="barrel")
+>>> a + b
 Quantity(FixedArray(5, scale=0), unit='barrel')
->> > bool(Quantity(5, unit=WILDCARD_UNIT) == Quantity(5, unit="barrel"))
+>>> bool(Quantity(5, unit=WILDCARD_UNIT) == Quantity(5, unit="barrel"))
 True
->> > Price("80.00", "USD", base_unit="barrel") * a
+>>> Price("80.00", "USD", base_unit="barrel") * a
 Money(FixedArray(240.00, scale=2), currency='USD')
 ```
 
@@ -243,9 +235,9 @@ Quantity.unit
 **示例**
 
 ```python
->> > Quantity(100).unit, Quantity("2.5", unit="BTC").unit
+>>> Quantity(100).unit, Quantity("2.5", unit="BTC").unit
 ('share', 'BTC')
->> > Quantity(1, unit="BTC") == Quantity(1, unit="btc")
+>>> Quantity(1, unit="BTC") == Quantity(1, unit="btc")
 False
 ```
 
@@ -269,10 +261,10 @@ False
 **示例**
 
 ```python
->> > q = Quantity([["1.5", "2.0"], ["3.0", "4.5"]], unit="barrel")
->> > (q.scale, q.shape, q.ndim, q.size, q.dtype)
+>>> q = Quantity([["1.5", "2.0"], ["3.0", "4.5"]], unit="barrel")
+>>> (q.scale, q.shape, q.ndim, q.size, q.dtype)
 (1, (2, 2), 2, 4, dtype('int64'))
->> > q.T
+>>> q.T
 Quantity(FixedArray([[1.5, 3.0],
                      [2.0, 4.5]], scale=1), unit='barrel')
 ```
@@ -312,21 +304,16 @@ q1 - q2
 **示例**
 
 ```python
->> > Quantity("1.5") + Quantity(2)
+>>> Quantity("1.5") + Quantity(2)
 Quantity(FixedArray(3.5, scale=1), unit='share')
->> > Quantity(1) - Quantity("0.001")
+>>> Quantity(1) - Quantity("0.001")
 Quantity(FixedArray(0.999, scale=3), unit='share')
->> > Quantity(3, unit="Any") + Quantity(2, unit="barrel")
+>>> Quantity(3, unit="Any") + Quantity(2, unit="barrel")
 Quantity(FixedArray(5, scale=0), unit='barrel')
->> > Quantity(1, unit="share") + Quantity(1, unit="barrel")
-Traceback(most
-recent
-call
-last):
-...
-TypeError: 单位不匹配: share
-与
-barrel
+>>> Quantity(1, unit="share") + Quantity(1, unit="barrel")
+Traceback (most recent call last):
+    ...
+TypeError: 单位不匹配: share 与 barrel
 ```
 
 **性能对比**
@@ -342,7 +329,7 @@ barrel
 - [`Quantity._resolve_unit`](#quantity_resolve_unit)
 - [`Quantity.sum`](#quantitysum-与-quantityis_zero)
 
-### +q、-q 与 abs (q)（正负号与绝对值）
+### `+q`、`-q` 与 `abs(q)`（正负号与绝对值）
 
 ```python
 +q
@@ -363,8 +350,8 @@ abs(q)
 **示例**
 
 ```python
->> > q = Quantity([-10, 25], unit="barrel")
->> > -q, abs(q)
+>>> q = Quantity([-10, 25], unit="barrel")
+>>> -q, abs(q)
 (Quantity(FixedArray([10, -25], scale=0), unit='barrel'), Quantity(FixedArray([10, 25], scale=0), unit='barrel'))
 ```
 
@@ -411,32 +398,25 @@ other * q
 无量纲精确乘法（`scale` 相加）：
 
 ```python
->> > from decimal import Decimal
->> > Quantity(3) * 0.5
+>>> from decimal import Decimal
+>>> Quantity(3) * 0.5
 Quantity(FixedArray(1.5, scale=1), unit='share')
->> > Quantity("1.5") * Decimal("0.33")
+>>> Quantity("1.5") * Decimal("0.33")
 Quantity(FixedArray(0.495, scale=3), unit='share')
->> > np.array([2, 3]) * Quantity(["1.25", "2.00"], unit="barrel")
+>>> np.array([2, 3]) * Quantity(["1.25", "2.00"], unit="barrel")
 Quantity(FixedArray([2.50, 6.00], scale=2), unit='barrel')
 ```
 
 与 [`Price`](price.md) 相乘消去标的单位得到 [`Money`](money.md)：
 
 ```python
->> > from moneta import Price
->> > Quantity(10, unit="share") * Price("189.50", "USD", base_unit="share")
+>>> from moneta import Price
+>>> Quantity(10, unit="share") * Price("189.50", "USD", base_unit="share")
 Money(FixedArray(1895.00, scale=2), currency='USD')
->> > Quantity(1, unit="barrel") * Price("189.50", "USD", base_unit="share")
-Traceback(most
-recent
-call
-last):
-...
-TypeError: 标的单位不匹配: 数量单位
-'barrel'
-与标价基准单位
-'share'
-不一致
+>>> Quantity(1, unit="barrel") * Price("189.50", "USD", base_unit="share")
+Traceback (most recent call last):
+    ...
+TypeError: 标的单位不匹配: 数量单位 'barrel' 与标价基准单位 'share' 不一致
 ```
 
 **性能对比**
@@ -478,21 +458,21 @@ Quantity.multiply(other, scale=None, rounding="half_up")
 **机制说明**
 
 先通过 [`self._as_factor(other, "乘数")`](unit_array.md#unitarray_as_factor) 与 [
-`FixedArray._check_rounding(rounding)`](fixed_array.md#fixedarray_check_rounding) 校验参数。若 `scale is None`，调用
+`check_rounding(rounding)`](_rounding.md#check_rounding) 校验参数。若 `scale is None`，调用
 `self._data.mul_round(factor, rounding=None)`；否则调用 `self._data.mul_round(factor, scale=scale, rounding=mode)`（支持
-Base $10^9$ 分块防中间溢出慢路径，只舍入一次）。
+Base $2^{21}$ 分块防中间溢出慢路径，只舍入一次）。
 
 **示例**
 
 ```python
->> > from decimal import Decimal
->> > Quantity("1.37").multiply(3)  # scale=None：精确相乘
+>>> from decimal import Decimal
+>>> Quantity("1.37").multiply(3)  # scale=None：精确相乘
 Quantity(FixedArray(4.11, scale=2), unit='share')
->> > Quantity("1.37").multiply(3, scale=1)  # half_up 舍入到 1 位小数
+>>> Quantity("1.37").multiply(3, scale=1)  # half_up 舍入到 1 位小数
 Quantity(FixedArray(4.1, scale=1), unit='share')
->> > Quantity("1.37").multiply(3, scale=0, rounding="down")  # 向零截断到整股
+>>> Quantity("1.37").multiply(3, scale=0, rounding="down")  # 向零截断到整股
 Quantity(FixedArray(4, scale=0), unit='share')
->> > Quantity(3).multiply(Decimal("0.5"), scale=0, rounding="half_even")
+>>> Quantity(3).multiply(Decimal("0.5"), scale=0, rounding="half_even")
 Quantity(FixedArray(2, scale=0), unit='share')
 ```
 
@@ -532,11 +512,11 @@ q / other
 **示例**
 
 ```python
->> > Quantity(10, "share") / 4
+>>> Quantity(10, "share") / 4
 Quantity(FixedArray(2.50000000, scale=8), unit='share')
->> > Quantity(1, "barrel") / Quantity(3, "barrel")  # 同单位相消得 FixedArray 比率
+>>> Quantity(1, "barrel") / Quantity(3, "barrel")  # 同单位相消得 FixedArray 比率
 FixedArray(0.33333333, scale=8)
->> > Quantity(1, "Any") / Quantity(4, "barrel")
+>>> Quantity(1, "Any") / Quantity(4, "barrel")
 FixedArray(0.25000000, scale=8)
 ```
 
@@ -591,19 +571,14 @@ Quantity.divide(other, scale=None, rounding="half_up")
 **示例**
 
 ```python
->> > Quantity(1, "share").divide(3, scale=2, rounding="up")
+>>> Quantity(1, "share").divide(3, scale=2, rounding="up")
 Quantity(FixedArray(0.34, scale=2), unit='share')
->> > Quantity("1", "share").divide(Quantity(3, "share"), scale=3, rounding="floor")
+>>> Quantity("1", "share").divide(Quantity(3, "share"), scale=3, rounding="floor")
 FixedArray(0.333, scale=3)
->> > Quantity(1, "share").divide(Money("1.00", "USD"))
-Traceback(most
-recent
-call
-last):
-...
-TypeError: 数量只能除以数值或同单位的
-Quantity，收到
-Money
+>>> Quantity(1, "share").divide(Money("1.00", "USD"))
+Traceback (most recent call last):
+    ...
+TypeError: 数量只能除以数值或同单位的 Quantity，收到 Money
 ```
 
 **另请参阅**
@@ -644,13 +619,13 @@ Quantity.rescale(scale, rounding="half_up")
 **示例**
 
 ```python
->> > Quantity("2.5", "share").rescale(0)  # 默认 half_up -> 3
+>>> Quantity("2.5", "share").rescale(0)  # 默认 half_up -> 3
 Quantity(FixedArray(3, scale=0), unit='share')
->> > Quantity("2.5", "share").rescale(0, "half_even")  # 银行家舍入 -> 2
+>>> Quantity("2.5", "share").rescale(0, "half_even")  # 银行家舍入 -> 2
 Quantity(FixedArray(2, scale=0), unit='share')
->> > Quantity("2.5", "barrel").rescale(0, "down")  # 向零截断并保留单位 barrel
+>>> Quantity("2.5", "barrel").rescale(0, "down")  # 向零截断并保留单位 barrel
 Quantity(FixedArray(2, scale=0), unit='barrel')
->> > Quantity(2, "BTC").rescale(4)
+>>> Quantity(2, "BTC").rescale(4)
 Quantity(FixedArray(2.0000, scale=4), unit='BTC')
 ```
 
@@ -700,12 +675,12 @@ Quantity.round_to_step(step, rounding="half_up")
 **示例**
 
 ```python
->> > from decimal import Decimal
->> > Quantity(250, "share").round_to_step(100, "down")  # 250 股按整手 100 股向下截断 -> 200 股
+>>> from decimal import Decimal
+>>> Quantity(250, "share").round_to_step(100, "down")  # 250 股按整手 100 股向下截断 -> 200 股
 Quantity(FixedArray(200, scale=0), unit='share')
->> > Quantity(250, "share").round_to_step(100)  # 默认 half_up -> 300 股
+>>> Quantity(250, "share").round_to_step(100)  # 默认 half_up -> 300 股
 Quantity(FixedArray(300, scale=0), unit='share')
->> > Quantity("0.123456", "BTC").round_to_step(Decimal("0.001"), "floor")
+>>> Quantity("0.123456", "BTC").round_to_step(Decimal("0.001"), "floor")
 Quantity(FixedArray(0.123000, scale=6), unit='BTC')
 ```
 
@@ -751,10 +726,10 @@ Quantity.is_on_step(step)
 **示例**
 
 ```python
->> > Quantity(300, "share").is_on_step(100), Quantity(250, "share").is_on_step(100)
+>>> Quantity(300, "share").is_on_step(100), Quantity(250, "share").is_on_step(100)
 (True, False)
->> > Quantity([100, 150, 200], "share").is_on_step(100)
-array([True, False, True])
+>>> Quantity([100, 150, 200], "share").is_on_step(100)
+array([ True, False,  True])
 ```
 
 **另请参阅**
@@ -767,7 +742,7 @@ array([True, False, True])
 ### Quantity.sum 与 Quantity.is_zero
 
 ```python
-Quantity.sum(axis=None, keepdims=False, out=None, dtype=None)
+Quantity.sum(axis=None, keepdims=False, skipna=True, out=None, dtype=None)
 Quantity.is_zero()
 ```
 
@@ -779,11 +754,11 @@ Quantity.is_zero()
 **示例**
 
 ```python
->> > q = Quantity([100, -100, 50], unit="share")
->> > q.sum()
+>>> q = Quantity([100, -100, 50], unit="share")
+>>> q.sum()
 Quantity(FixedArray(50, scale=0), unit='share')
->> > (q - Quantity([100, -100, 0], unit="share")).is_zero()
-array([True, True, False])
+>>> (q - Quantity([100, -100, 0], unit="share")).is_zero()
+array([ True,  True, False])
 ```
 
 ### 比较、索引与形状变换
@@ -804,18 +779,13 @@ array([True, True, False])
 **示例**
 
 ```python
->> > q = Quantity(["10.5", "20.0", "5.25"], unit="barrel")
->> > q[q >= Quantity(10, unit="barrel")]
+>>> q = Quantity(["10.5", "20.0", "5.25"], unit="barrel")
+>>> q[q >= Quantity(10, unit="barrel")]
 Quantity(FixedArray([10.50, 20.00], scale=2), unit='barrel')
->> > Quantity(1, unit="share") < Quantity(2, unit="barrel")
-Traceback(most
-recent
-call
-last):
-...
-TypeError: 单位不匹配: share
-与
-barrel
+>>> Quantity(1, unit="share") < Quantity(2, unit="barrel")
+Traceback (most recent call last):
+    ...
+TypeError: 单位不匹配: share 与 barrel
 ```
 
 ### Quantity.to_pandas
@@ -840,8 +810,8 @@ Quantity.to_pandas(index=None, name=None, as_float=True)
 **示例**
 
 ```python
->> > s = Quantity(["1.5", "2.0"], unit="barrel").to_pandas(name="qty")
->> > s.tolist(), s.attrs["unit"], s.name
+>>> s = Quantity(["1.5", "2.0"], unit="barrel").to_pandas(name="qty")
+>>> s.tolist(), s.attrs["unit"], s.name
 ([1.5, 2.0], 'barrel', 'qty')
 ```
 
@@ -863,8 +833,8 @@ Quantity.to_decimal()
 **示例**
 
 ```python
->> > q = Quantity("1.50", unit="barrel")
->> > q.to_float(), q.to_decimal()
+>>> q = Quantity("1.50", unit="barrel")
+>>> q.to_float(), q.to_decimal()
 (1.5, Decimal('1.50'))
 ```
 
@@ -873,7 +843,7 @@ Quantity.to_decimal()
 - [`UnitArray.to_float`](unit_array.md#unitarrayto_float)、[`UnitArray.to_decimal`](unit_array.md#unitarrayto_decimal)、[
   `UnitArray.to_polars`](unit_array.md#unitarrayto_polars)
 
-### str (q) 与 repr (q)（文本表示）
+### `str(q)` 与 `repr(q)`（文本表示）
 
 ```python
 str(q)
@@ -889,10 +859,10 @@ repr(q)
 **示例**
 
 ```python
->> > q = Quantity("1.5", unit="barrel")
->> > str(q)
+>>> q = Quantity("1.5", unit="barrel")
+>>> str(q)
 '1.5 barrel'
->> > repr(Quantity(3))
+>>> repr(Quantity(3))
 "Quantity(FixedArray(3, scale=0), unit='share')"
 ```
 
@@ -919,10 +889,10 @@ Quantity._create_like(new_data, unit=None)
 **示例**
 
 ```python
->> > q = Quantity(10, unit="barrel")
->> > q._create_like(FixedArray("2.5"))
+>>> q = Quantity(10, unit="barrel")
+>>> q._create_like(FixedArray("2.5"))
 Quantity(FixedArray(2.5, scale=1), unit='barrel')
->> > q._create_like(FixedArray(5), unit="share")
+>>> q._create_like(FixedArray(5), unit="share")
 Quantity(FixedArray(5, scale=0), unit='share')
 ```
 
@@ -988,11 +958,11 @@ Quantity._resolve_unit(other)
 **示例**
 
 ```python
->> > Quantity(1, "Any")._resolve_unit(Quantity(2, "barrel"))
+>>> Quantity(1, "Any")._resolve_unit(Quantity(2, "barrel"))
 'barrel'
->> > Quantity(1, "barrel")._resolve_unit(Quantity(2, "Any"))
+>>> Quantity(1, "barrel")._resolve_unit(Quantity(2, "Any"))
 'barrel'
->> > Quantity(1, "Any")._resolve_unit(Quantity(2, "Any"))
+>>> Quantity(1, "Any")._resolve_unit(Quantity(2, "Any"))
 'Any'
 ```
 

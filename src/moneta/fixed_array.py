@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import sys
+import warnings
 from decimal import Decimal
 from fractions import Fraction
 from typing import Any, Callable, Optional, Tuple, Union
@@ -18,6 +20,19 @@ from ._rounding import RoundingMode, check_rounding, decide_bump, round_quotient
 # int64 边界常量
 _MAX = (1 << 63) - 1
 _MIN = -(1 << 63)
+_ON_EXCESS = ("raise", "warn")
+
+
+class PrecisionLossWarning(UserWarning):
+    """精确输入（str、Decimal、Fraction、FixedArray 等）超出目标精度、被舍入时发出的警告。"""
+
+
+def _user_stacklevel() -> int:
+    """告警指向的栈层级：跳过 moneta 包内部的调用帧，指向用户代码。"""
+    frame, level = sys._getframe(1), 1
+    while frame is not None and frame.f_globals.get("__name__", "").split(".")[0] == "moneta":
+        frame, level = frame.f_back, level + 1
+    return level
 
 
 class FixedArray:
@@ -40,20 +55,29 @@ class FixedArray:
 
     # ---------- 构造与核心属性 ----------
 
-    def __init__(self, values: Any, scale: Optional[int] = None, mask: Optional[Any] = None) -> None:
-        """构造 FixedArray。支持显式 scale、未知 scale 自动探测、字符串/对象解析及可选 mask 缺失值。"""
+    def __init__(self, values: Any, scale: Optional[int] = None, mask: Optional[Any] = None,
+                 on_excess: str = "raise") -> None:
+        """构造 FixedArray。支持显式 scale、未知 scale 自动探测、字符串/对象解析及可选 mask 缺失值。
+
+        指定 scale 时：float 是近似值，按最短写法 half_up 静默舍入；精确输入（str、Decimal、Fraction、
+        FixedArray 等）在多出的小数位上有非零数字时按 on_excess 处理——"raise" 报 ValueError，
+        "warn" 发出 PrecisionLossWarning 后按 half_up 舍入。多出的只是末尾的 0 时直接对齐，不报错也不告警。
+        """
+        if on_excess not in _ON_EXCESS:
+            raise ValueError(f"on_excess 只能是 {_ON_EXCESS} 之一，收到 {on_excess!r}")
         if values is None or (isinstance(values, (float, np.floating)) and np.isnan(values)):
             s = 0 if scale is None else self._check_scale(scale)
             self._set(np.int64(0), s, mask=np.array(True, dtype=bool))
             return
-
-        if isinstance(values, FixedArray):
-            source = values if scale is None else values.rescale(scale)
-            eff_mask = source._mask if mask is None else self._combine_masks(source._mask, np.asarray(mask, dtype=bool))
-            self._set(source._mantissa, source._scale, mask=eff_mask)
-            return
         if scale is not None:
             scale = self._check_scale(scale)
+        if isinstance(values, FixedArray):
+            m, s = values._mantissa, values._scale
+            if scale is not None:
+                m, s = self._quantize_precision(m, s, scale, values._mask, on_excess), scale
+            eff_mask = values._mask if mask is None else self._combine_masks(values._mask, np.asarray(mask, dtype=bool))
+            self._set(m, s, mask=eff_mask)
+            return
 
         try:
             arr = np.asarray(values)
@@ -102,9 +126,7 @@ class FixedArray:
             # 路径 5：字符串、Decimal、Fraction 或混合对象（标量与数组同一条路径）
             m, s, text_mask = self._parse_text_array(arr)
             if scale is not None:
-                if s > scale:
-                    raise ValueError(f"输入的小数位数 ({s}) 超出指定 scale ({scale})")
-                m, s = self._mul_pow10(m, scale - s), scale
+                m, s = self._quantize_precision(m, s, scale, text_mask, on_excess), scale
             eff_mask = text_mask if mask is None else self._combine_masks(text_mask, np.asarray(mask, dtype=bool))
             self._set(m, s, mask=eff_mask)
         else:
@@ -293,15 +315,23 @@ class FixedArray:
             return None
         return cls(other)
 
-    def _lose_precision(self, target_scale: int) -> bool:
-        """降到 target_scale 位小数是否会改变数值：多出的小数位上有非零数字才算，末尾的 0 不算。"""
-        k = self._scale - target_scale
-        if k <= 0:
-            return False
-        valid = True if self._mask is None else (~self._mask)
-        if k > 18:  # |尾数| < 10^19 ≤ 10^k：只有 0 能被整除
-            return bool(np.any((self._mantissa != 0) & valid))
-        return bool(np.any((self._mantissa % (10 ** k) != 0) & valid))
+    @staticmethod
+    def _quantize_precision(m: np.ndarray, s: int, scale: int, mask: Optional[np.ndarray],
+                            on_excess: str) -> np.ndarray:
+        """精确输入的尾数对齐到 scale：不足时补 0；多出的位上有非零数字（缺失位置除外）时按 on_excess
+        报 ValueError，或发出 PrecisionLossWarning 后 half_up 舍入；多出的只是末尾的 0 时直接对齐。"""
+        if s <= scale:
+            return FixedArray._mul_pow10(m, scale - s)
+        k = s - scale
+        lost = (m != 0) if k > 18 else (m % (10 ** k) != 0)  # k > 18 时 |尾数| < 10^k，只有 0 能被整除
+        if mask is not None:
+            lost = lost & ~mask
+        if np.any(lost):
+            message = f"输入的小数位数 ({s}) 超出指定 scale ({scale})"
+            if on_excess == "raise":
+                raise ValueError(message)
+            warnings.warn(f"{message}，已按 half_up 舍入", PrecisionLossWarning, stacklevel=_user_stacklevel())
+        return FixedArray._round_div_pow10(m, 0, 1, k, "half_up")
 
     @staticmethod
     def _check_scale(scale: Any) -> int:
@@ -1758,4 +1788,4 @@ class FixedArray:
 
 _NUMPY_DISPATCHED = frozenset({np.sum, np.mean, np.transpose, np.shape, np.ndim, np.size})
 
-__all__ = ["FixedArray", "RoundingMode"]
+__all__ = ["FixedArray", "PrecisionLossWarning", "RoundingMode"]

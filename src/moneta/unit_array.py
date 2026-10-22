@@ -8,6 +8,8 @@
 - ``==`` / ``!=`` 永不因单位不兼容而报错：不兼容即不相等；``< <= > >=`` 遇到单位不兼容的
   UnitArray 报 TypeError，遇到其他类型返回 NotImplemented（最终由 Python 报 TypeError）。
 - 与 FixedArray 一样禁止 NumPy ufunc 与隐式转数组，避免被静默降级为 object 数组。
+- 缺失值（NA）由底层 FixedArray 的掩码承载：运算按掩码传播；isna / notna / fillna / dropna 与
+  sum(skipna=...) 由基类统一提供。步长、tick 等网格参数不能是缺失值。
 """
 
 from __future__ import annotations
@@ -19,10 +21,6 @@ from typing import Any, Callable, Iterator, Optional, Tuple, Union
 import numpy as np
 
 from .fixed_array import FixedArray
-
-
-class PrecisionLossWarning(UserWarning):
-    """精确输入（str、Decimal、Fraction、FixedArray 等）超出目标精度、被舍入时发出的警告。"""
 
 
 class UnitArray(ABC):
@@ -57,6 +55,18 @@ class UnitArray(ABC):
                             f"收到 {type(other).__name__}")
         return factor
 
+    @classmethod
+    def _as_grid(cls, step: Any, what: str) -> FixedArray:
+        """步长、tick 等网格参数：数值白名单内且不含缺失值。"""
+        grid = cls._as_factor(step, what)
+        if grid.mask is not None:
+            raise ValueError(f"{what}不能是缺失值")
+        return grid
+
+    def _fill_value(self, value: Any) -> FixedArray:
+        """fillna 的数值填充值 → FixedArray；Money 等有固定精度的子类覆盖它，按自己的构造规则换算。"""
+        return self._as_factor(value, "填充值")
+
     @staticmethod
     def _check_unit(unit: Any) -> str:
         """单位必须是非空 str，去掉首尾空白后返回。"""
@@ -76,7 +86,7 @@ class UnitArray(ABC):
 
     @property
     def mantissa(self) -> np.ndarray:
-        """底层纯整数尾数矩阵（只读视图）。"""
+        """底层纯整数尾数矩阵（只读视图）。缺失位置为 0，请配合 isna() 使用。"""
         return self._data.mantissa
 
     @property
@@ -104,6 +114,33 @@ class UnitArray(ABC):
         """底层整数数据类型（int64）。"""
         return self._data.dtype
 
+    # ---------- 缺失值（NA） ----------
+
+    def isna(self) -> np.ndarray:
+        """标记缺失位置的布尔数组（0 维时为 0 维数组）。"""
+        return self._data.isna()
+
+    isnull = isna
+
+    def notna(self) -> np.ndarray:
+        """标记有效数值位置的布尔数组。"""
+        return self._data.notna()
+
+    notnull = notna
+
+    def fillna(self, value: Any) -> "UnitArray":
+        """用同类对象（单位须兼容）或数值填充缺失位置；数值按本类的构造规则换算，结果保持原单位。"""
+        if isinstance(value, UnitArray):
+            self._check_compatible(value)
+            fill = value._data
+        else:
+            fill = self._fill_value(value)
+        return self._create_like(self._data.fillna(fill))
+
+    def dropna(self) -> "UnitArray":
+        """丢弃缺失值（仅限 1 维），结果保持原单位。"""
+        return self._create_like(self._data.dropna())
+
     # ---------- 索引、切片与容器协议 ----------
 
     def __len__(self) -> int:
@@ -127,6 +164,10 @@ class UnitArray(ABC):
         """禁止隐式转成 NumPy 数组（np.asarray 等），避免带单位对象被降级为 object 数组。"""
         raise TypeError(f"{type(self).__name__} 不能隐式转成数组：要 float 请用 to_float()，要整数尾数请用 .mantissa")
 
+    def __array_function__(self, func: Any, types: Any, args: Any, kwargs: Any) -> Any:
+        """NumPy 函数白名单，规则同 FixedArray：其余函数报 TypeError，防止 np.array_equal 等静默出错。"""
+        return FixedArray._array_function(func, args, kwargs, type(self).__name__)
+
     def reshape(self, *shape: Any) -> "UnitArray":
         """改变张量形状。"""
         return self._create_like(self._data.reshape(*shape))
@@ -139,6 +180,14 @@ class UnitArray(ABC):
     def T(self) -> "UnitArray":
         """转置快捷属性。"""
         return self.transpose()
+
+    def swapaxes(self, axis1: int, axis2: int) -> "UnitArray":
+        """交换两个轴。"""
+        return self._create_like(self._data.swapaxes(axis1, axis2))
+
+    def squeeze(self, axis: Optional[Union[int, Tuple[int, ...]]] = None) -> "UnitArray":
+        """移除长度为 1 的轴。"""
+        return self._create_like(self._data.squeeze(axis=axis))
 
     # ---------- 不改变单位的运算 ----------
 
@@ -153,14 +202,14 @@ class UnitArray(ABC):
         """绝对值，int64 最小值报 OverflowError。"""
         return self._create_like(abs(self._data))
 
-    def sum(self, axis: Optional[Union[int, Tuple[int, ...]]] = None, keepdims: bool = False, out: None = None,
-            dtype: None = None) -> "UnitArray":
-        """沿轴精确求和，结果保持原单位。``np.sum(x)`` 也会转到这里；out、dtype 规则同 FixedArray.sum。"""
-        return self._create_like(self._data.sum(axis=axis, keepdims=keepdims, out=out, dtype=dtype))
+    def sum(self, axis: Optional[Union[int, Tuple[int, ...]]] = None, keepdims: bool = False,
+            skipna: bool = True, out: None = None, dtype: None = None) -> "UnitArray":
+        """沿轴精确求和，结果保持原单位。``np.sum(x)`` 也会转到这里；skipna、out、dtype 规则同 FixedArray.sum。"""
+        return self._create_like(self._data.sum(axis=axis, keepdims=keepdims, skipna=skipna, out=out, dtype=dtype))
 
     def is_zero(self) -> Union[np.bool_, np.ndarray]:
-        """是否为 0：0 维返回 np.bool_，数组返回逐元素的 bool 数组。"""
-        return self._data.mantissa == 0
+        """是否为 0：0 维返回 np.bool_，数组返回逐元素的 bool 数组；缺失值不是 0。"""
+        return (self._data.mantissa == 0) & self._data.notna()
 
     # ---------- 比较操作符 (经由单位兼容性安检) ----------
 
@@ -224,4 +273,4 @@ class UnitArray(ABC):
         return self._data.to_polars(name=name, as_float=as_float)
 
 
-__all__ = ["PrecisionLossWarning", "UnitArray"]
+__all__ = ["UnitArray"]

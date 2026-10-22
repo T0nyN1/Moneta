@@ -7,19 +7,19 @@
 - 数量没有固定精度：运算精确，乘法结果的 scale 为两侧之和；需要取整到整股、整手时显式调用
   multiply(scale=...)、rescale 或 round_to_step。
 - 除以数值或同单位数量时，默认保留 max(两侧 scale) + 8 位小数，可用 scale 指定。
-- 构造时指定 scale：float 按最短写法 half_up 舍入；精确输入超出 scale 时发出 PrecisionLossWarning 后舍入。
+- 构造时指定 scale：float 按最短写法 half_up 舍入；精确输入超出 scale 时由 FixedArray 发出 PrecisionLossWarning 后舍入。
 - 运算只接受数值白名单内的操作数，拒绝字符串；运算符遇到不认识的类型返回 NotImplemented。
 """
 
 from __future__ import annotations
 
-import warnings
 from typing import Any, Optional, Union
 
 import numpy as np
 
+from ._rounding import check_rounding
 from .fixed_array import FixedArray, RoundingMode
-from .unit_array import PrecisionLossWarning, UnitArray
+from .unit_array import UnitArray
 
 _RATIO_EXTRA_DIGITS = 8  # 除法结果相对两侧 scale 额外保留的小数位数
 WILDCARD_UNIT = "Any"
@@ -52,19 +52,10 @@ class Quantity(UnitArray):
             if WILDCARD_UNIT not in (values._unit, unit) and values._unit != unit:
                 raise TypeError(f"单位不匹配: {values._unit} 与 {unit}")
             data = values._data
-        elif isinstance(values, FixedArray):
-            data = values
-        elif scale is not None and np.asarray(values).dtype.kind == "f":
-            data = FixedArray(values, scale=scale)  # float 本身是近似值：按最短写法 half_up 舍入
         else:
-            data = FixedArray(values)
-        if scale is not None:
-            scale = FixedArray._check_scale(scale)
-            if data.scale > scale:
-                warnings.warn(f"输入的小数位数 ({data.scale}) 超出指定 scale ({scale})，已按 half_up 舍入",
-                              PrecisionLossWarning, stacklevel=2)
-            data = data.rescale(scale, "half_up")
-        self._data = data
+            data = values
+        # 指定 scale 时 float 静默舍入；精确输入丢精度时由 FixedArray 告警后舍入
+        self._data = FixedArray(data, scale=scale, on_excess="warn")
         self._unit = unit
 
     # ---------- 核心抽象钩子实现 ----------
@@ -113,7 +104,7 @@ class Quantity(UnitArray):
     def multiply(self, other: Any, scale: Optional[int] = None, rounding: Rounding = "half_up") -> "Quantity":
         """数量乘以无量纲数值：不指定 scale 时精确相乘（scale 为两侧之和），否则按 rounding 舍入到 scale。"""
         factor = self._as_factor(other, "乘数")
-        mode = FixedArray._check_rounding(rounding)
+        mode = check_rounding(rounding)
         if scale is None:
             return self._create_like(self._data.mul_round(factor, rounding=None))
         return self._create_like(self._data.mul_round(factor, scale=scale, rounding=mode))
@@ -125,7 +116,7 @@ class Quantity(UnitArray):
         - Quantity / 同单位（或通配单位）Quantity → 无量纲比率 FixedArray。
         默认保留 max(两侧 scale) + 8 位小数，可用 scale 指定；按 rounding 舍入。
         """
-        mode = FixedArray._check_rounding(rounding)
+        mode = check_rounding(rounding)
         if isinstance(other, Quantity):
             self._check_compatible(other)
             target = max(self.scale, other.scale) + _RATIO_EXTRA_DIGITS if scale is None else scale
@@ -160,11 +151,11 @@ class Quantity(UnitArray):
 
     def round_to_step(self, step: Any, rounding: Rounding = "half_up") -> "Quantity":
         """对齐到步长网格，例如按每手 100 股取整：round_to_step(100, "down")。"""
-        return self._create_like(self._data.round_to_step(self._as_factor(step, "步长"), rounding=rounding))
+        return self._create_like(self._data.round_to_step(self._as_grid(step, "步长"), rounding=rounding))
 
     def is_on_step(self, step: Any) -> Union[bool, np.ndarray]:
-        """检查数量是否严格位于步长网格上（如是否为整手）。"""
-        return self._data.is_on_step(self._as_factor(step, "步长"))
+        """检查数量是否严格位于步长网格上（如是否为整手；缺失值不在任何格点上）。"""
+        return self._data.is_on_step(self._as_grid(step, "步长"))
 
     # ---------- 展示与转换 ----------
 

@@ -36,7 +36,7 @@ import pytest
 import moneta.fixed_array as fixed_array_module
 from moneta import Money, Quantity
 from moneta._limbs import limbs_mul
-from moneta.fixed_array import FixedArray as F, RoundingMode
+from moneta.fixed_array import FixedArray as F, PrecisionLossWarning, RoundingMode
 
 MIN, MAX = -(2 ** 63), 2 ** 63 - 1
 MODES = [m.value for m in RoundingMode]
@@ -456,6 +456,54 @@ class TestConstructExact:
         assert run_isolated(code) == "ok"
 
 
+class TestOnExcess:
+    """指定 scale 时精确输入多出小数位的处理：raise（默认）或 warn；float 始终静默舍入。"""
+
+    @pytest.mark.parametrize("value", ["1.005", Decimal("1.005"), Fraction(201, 200), F("1.005"), ["1.005", "2"],
+                                       np.array([Decimal("1.005")], dtype=object), [F("1.005"), 2]])
+    def test_exact_inputs(self, value):
+        with pytest.raises(ValueError, match=r"输入的小数位数 \(3\) 超出指定 scale \(2\)"):
+            F(value, scale=2)
+        with pytest.warns(PrecisionLossWarning, match=r"超出指定 scale \(2\)，已按 half_up 舍入"):
+            got = F(value, scale=2, on_excess="warn")
+        assert got.scale == 2 and np.ravel(got.mantissa).tolist()[0] == 101
+
+    @pytest.mark.parametrize("on_excess", ["raise", "warn"])
+    def test_silent_cases(self, on_excess):
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            assert int(F(1.005, scale=2, on_excess=on_excess).mantissa) == 101  # float：最短写法 half_up，静默
+            assert F(np.array([1e10, 1 / 3]), scale=2, on_excess=on_excess).mantissa.tolist() == [10 ** 12, 33]
+            assert int(F("1.50", scale=1, on_excess=on_excess).mantissa) == 15  # 末尾的 0
+            assert int(F("1.5", scale=3, on_excess=on_excess).mantissa) == 1500  # 补 0
+            assert int(F(12, scale=2, on_excess=on_excess).mantissa) == 1200  # 整数
+            assert F(None, scale=2, on_excess=on_excess).isna()
+            assert int(F("1.005", on_excess=on_excess).mantissa) == 1005  # 不指定 scale：按输入精度
+
+    @pytest.mark.parametrize("bad", ["ignore", "RAISE", None, True])
+    def test_invalid_on_excess(self, bad):
+        with pytest.raises(ValueError, match="on_excess 只能是"):
+            F("1", on_excess=bad)
+
+    def test_warning_points_to_user_code(self):
+        for make in (lambda: F("1.005", scale=2, on_excess="warn"), lambda: Money("1.005", "USD"),
+                     lambda: Quantity("1.25", scale=1), lambda: Money([None, "1"], "USD").fillna(Decimal("1.005"))):
+            with pytest.warns(PrecisionLossWarning) as record:
+                make()
+            assert len(record) == 1 and record[0].filename == __file__  # 跳过 moneta 内部的调用帧
+
+    def test_warning_class_and_exports(self):
+        import moneta.unit_array
+        assert issubclass(PrecisionLossWarning, UserWarning) and moneta.PrecisionLossWarning is PrecisionLossWarning
+        assert PrecisionLossWarning.__module__ == "moneta.fixed_array" and "PrecisionLossWarning" in fixed_array_module.__all__
+        assert not hasattr(moneta.unit_array, "PrecisionLossWarning") and not hasattr(moneta.money,
+                                                                                      "PrecisionLossWarning")
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", PrecisionLossWarning)  # 严格模式：告警变成异常
+            with pytest.raises(PrecisionLossWarning):
+                F("1.005", scale=2, on_excess="warn")
+
+
 class TestConstructValidation:
     @pytest.mark.parametrize("scale", [-1, 2.0, "2", True, np.bool_(True), np.int64(-1)])
     def test_scale_must_be_non_negative_int(self, scale):
@@ -487,8 +535,12 @@ class TestCopyAndImmutability:
         a = F("1.5")
         b = F(a)
         assert b == a and b.scale == 1
-        assert int(F(F("1.25"), scale=1).mantissa) == 13  # half_up
         assert int(F(F("1.5"), scale=3).mantissa) == 1500
+        assert int(F(F("1.20"), scale=1).mantissa) == 12  # 多出的只是末尾的 0：直接对齐
+        with pytest.raises(ValueError, match="超出指定 scale"):  # FixedArray 是精确输入：默认不悄悄舍入
+            F(F("1.25"), scale=1)
+        with pytest.warns(PrecisionLossWarning):
+            assert int(F(F("1.25"), scale=1, on_excess="warn").mantissa) == 13  # half_up
 
     def test_mantissa_readonly(self):
         for fa in (F(["1.5"]), F(F(["1.5"])), F(["1.5"]) + F(["1"]), F(["1.5"]) * 2, F(np.array([1.5]), scale=2)):
@@ -512,7 +564,7 @@ class TestCopyAndImmutability:
     def test_every_path_yields_readonly_int64_array(self):
         cases = [F(12), F(12, scale=2), F([1, 2]), F(1.5), F(1.5, scale=2), F(np.array([1.5])), F("1.5"),
                  F(["1.5"]), F(Fraction(1, 8)), F(np.array([Decimal("1")], dtype=object)), F(F("1.5")),
-                 F(F("1.25"), scale=1), F._from_mantissa(np.int64(3), 0), F._from_mantissa(3, 0)]
+                 F(F("1.20"), scale=1), F._from_mantissa(np.int64(3), 0), F._from_mantissa(3, 0)]
         for fa in cases:
             assert isinstance(fa.mantissa, np.ndarray) and fa.dtype == np.int64
             assert not fa.mantissa.flags.writeable
@@ -2249,12 +2301,16 @@ class TestRegressions:
             with pytest.raises(OverflowError, match="超出 int64 范围"):
                 make()
 
-    def test_lose_precision(self):
-        assert not F("1.000")._lose_precision(2) and F("1.005")._lose_precision(2)
-        assert not F("1.5")._lose_precision(1) and not F("1.5")._lose_precision(3)
-        assert not raw([0, 0], 30)._lose_precision(2) and raw([0, 1], 30)._lose_precision(2)
-        assert raw([MIN], 18)._lose_precision(0) and not raw([-(10 ** 18)], 18)._lose_precision(0)
-        assert not F(["1.000", None])._lose_precision(2) and F([None, "1.005"])._lose_precision(2)  # NA 不算
+    def test_excess_checks_real_loss_only(self):
+        # 只看多出的位上有没有非零数字：末尾的 0、缺失位置都不算丢精度
+        assert F("1.000", scale=2).mantissa == 100 and F(["1.000", None], scale=2).mantissa.tolist() == [100, 0]
+        assert F(raw([0, 0], 30), scale=2).mantissa.tolist() == [0, 0]  # k > 18：只有 0 能被整除
+        assert int(F(raw(-(10 ** 18), 18), scale=0).mantissa) == -1
+        for value, scale in (("1.005", 2), ([None, "1.005"], 2), (raw([0, 1], 30), 2), (raw(MIN, 18), 0)):
+            with pytest.raises(ValueError, match="超出指定 scale"):
+                F(value, scale=scale)
+            with pytest.warns(PrecisionLossWarning):
+                F(value, scale=scale, on_excess="warn")
 
     # ---- 第二轮复核：比较 ----
     def test_eq_with_unrepresentable_values_is_elementwise(self):

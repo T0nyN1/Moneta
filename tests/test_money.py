@@ -25,9 +25,9 @@ import numpy as np
 import pytest
 
 from moneta import Money, Price, Quantity
+from moneta import PrecisionLossWarning
 from moneta.currency import JPY, USD, Currency
 from moneta.fixed_array import FixedArray as F, RoundingMode
-from moneta.money import PrecisionLossWarning
 
 MIN, MAX = -(2 ** 63), 2 ** 63 - 1
 MODES = [m.value for m in RoundingMode]
@@ -97,9 +97,15 @@ class TestConstruct:
                                              (Fraction(1, 8), 13), (["1.001", "2"], [100, 200]),
                                              (np.array([1.005, "2"], dtype=object), [101, 200])])
     def test_exact_inputs_beyond_precision_warn_then_round(self, value, want):
-        with pytest.warns(PrecisionLossWarning, match="超出 USD 的精度"):
+        with pytest.warns(PrecisionLossWarning, match=r"超出指定 scale \(2\)"):
             m = usd(value)
         assert units(m) == want and m.scale == 2
+
+    @pytest.mark.parametrize("value, want", [("1.000", 100), (Decimal("-2.5000"), -250), (F("3.10000"), 310),
+                                             (["1.000", "2.10"], [100, 210]), (F._from_mantissa(0, 30), 0),
+                                             (Fraction(5, 4), 125)])
+    def test_trailing_zeros_do_not_warn(self, value, want, no_warnings):
+        assert units(usd(value)) == want
 
     def test_precision_warning_is_a_user_warning_and_can_be_an_error(self):
         assert issubclass(PrecisionLossWarning, UserWarning)
@@ -127,10 +133,21 @@ class TestConstruct:
         custom = Currency("XYZ", 4)
         assert Money("1.2345", custom).scale == 4
 
-    @pytest.mark.parametrize("bad", [True, np.array([True]), None, object()])
+    @pytest.mark.parametrize("bad", [True, np.array([True]), object()])
     def test_invalid_values(self, bad):
         with pytest.raises((TypeError, ValueError)):
             usd(bad)
+
+    def test_missing_values(self, no_warnings):
+        m = usd([None, "1.5", float("nan"), Decimal("NaN")])
+        assert m.isna().tolist() == [True, False, True, True] and m.scale == 2 and units(m) == [0, 150, 0, 0]
+        assert usd(None).isna() and usd(np.array([np.nan, 1.234])).isna().tolist() == [True, False]
+
+    def test_sequence_with_fixed_array_elements(self):
+        assert units(usd([F("1.5"), 2])) == [150, 200]
+        with pytest.warns(PrecisionLossWarning, match=r"超出指定 scale \(2\)"):
+            got = usd([F("1.005"), 2])  # FixedArray 是精确输入：丢精度要告警
+        assert units(got) == [101, 200]
 
     def test_from_units_copies_and_validates(self):
         arr = np.array([100, 200], dtype=np.int64)
@@ -262,7 +279,7 @@ class TestMultiply:
         with pytest.raises(TypeError, match="禁止两笔金额直接相乘"):
             usd("1") * usd("2")
 
-    @pytest.mark.parametrize("bad", ["0.05", b"1", True, None, ["1", 2]])
+    @pytest.mark.parametrize("bad", ["0.05", b"1", True, ["1", 2]])
     def test_strings_and_non_numeric_rejected(self, bad):
         assert usd("1").__mul__(bad) is NotImplemented and usd("1").__rmul__(bad) is NotImplemented
         with pytest.raises(TypeError):
@@ -366,7 +383,7 @@ class TestDivide:
                                                     step=F._from_mantissa(np.int64(step_m), step_s))
             assert Fraction(units(got), 100) == want, (a, dm, ds, step_m, step_s, mode)
 
-    @pytest.mark.parametrize("bad", ["2", None, True])
+    @pytest.mark.parametrize("bad", ["2", True])
     def test_non_numeric(self, bad):
         assert usd("1").__truediv__(bad) is NotImplemented
         with pytest.raises(TypeError):
@@ -398,7 +415,16 @@ class TestMatmul:
         assert np.all(np.array([[1, 1]]) @ m == usd(["3.00"]))
         assert np.all(w @ m == usd(["1.00", "1.50"]))
 
-    @pytest.mark.parametrize("bad", ["1", usd(["1"]), None])
+    def test_no_intermediate_overflow(self):
+        big = usd(["90000000"])  # 精确内积在 12 位小数下约 1e20，超出 int64；舍入到 2 位后放得下
+        w = [Decimal("1.1234567891")]  # 精确值 101111111.019
+        assert big.matmul(w) == big * Decimal("1.1234567891") == usd("101111111.02")
+        assert big @ F(w) == usd("101111111.02")
+        assert np.all(F([w]) @ big == usd(["101111111.02"]))
+        assert big.matmul(w, rounding="down") == usd("101111111.01") and big.matmul(w, rounding="up") == usd(
+            "101111111.02")
+
+    @pytest.mark.parametrize("bad", ["1", usd(["1"])])
     def test_rejects_non_numeric(self, bad):
         assert usd(["1"]).__matmul__(bad) is NotImplemented and usd(["1"]).__rmatmul__(bad) is NotImplemented
         with pytest.raises(TypeError):
@@ -469,10 +495,10 @@ class TestSteps:
 
 class TestDivmod:
     def test_by_money_counts_portions(self):
-        count, rest = divmod(usd("10.00"), usd("3.00"))
-        assert count == 3 and type(count) is int and rest == usd("1.00")
+        count, rest = divmod(usd("10.00"), usd("3.00"))  # 份数是 scale 为 0 的 FixedArray
+        assert isinstance(count, F) and (count.scale, int(count.mantissa)) == (0, 3) and rest == usd("1.00")
         count, rest = divmod(usd(["10", "-10"]), usd("3"))
-        assert count.tolist() == [3, -4] and np.all(rest == usd(["1", "2"]))
+        assert count.mantissa.tolist() == [3, -4] and np.all(rest == usd(["1", "2"]))
         with pytest.raises(TypeError, match="币种不匹配"):
             divmod(usd("1"), Money("1", "CNY"))
         with pytest.raises(ZeroDivisionError):
@@ -497,12 +523,12 @@ class TestDivmod:
         with pytest.raises(ValueError, match="正整数"):
             divmod(usd("10"), n)
 
-    @pytest.mark.parametrize("n", [3.0, 1.5, Decimal("3"), Fraction(3), F("3"), np.array([1.5])])
+    @pytest.mark.parametrize("n", [3.0, 1.5, Decimal("3"), Fraction(3), F("3"), np.array([1.5]), None])
     def test_non_integer_suggests_allocate(self, n):
         with pytest.raises(TypeError, match="allocate"):
             divmod(usd("10"), n)
 
-    @pytest.mark.parametrize("bad", ["3", True, None, Price("1", "USD")])
+    @pytest.mark.parametrize("bad", ["3", True, Price("1", "USD")])
     def test_non_numeric(self, bad):
         assert usd("10").__divmod__(bad) is NotImplemented
         with pytest.raises(TypeError):
@@ -570,10 +596,20 @@ class TestTieredFee:
     def test_tiers(self):
         assert usd("6000").calc_tiered_fee(TIERS) == usd("31.00")  # 10 + 20 + 1
         assert usd("500").calc_tiered_fee(TIERS) == usd("5.00")
-        assert usd("-500").calc_tiered_fee(TIERS) == usd("0")
+        assert usd("-500").calc_tiered_fee(TIERS) == usd("5.00")  # 负金额按绝对值计费
         assert np.all(usd(["500", "6000", "0"]).calc_tiered_fee(TIERS) == usd(["5", "31", "0"]))
         money_tiers = [(usd("1000"), Decimal("0.01")), (None, Decimal("0.001"))]
         assert usd("1500").calc_tiered_fee(money_tiers) == usd("10.50")
+
+    def test_negative_amount_charged_on_absolute_value(self):
+        assert usd("-100").calc_tiered_fee(Decimal("0.01")) == usd("1.00")
+        assert usd(["-100", "100"]).calc_tiered_fee(Decimal("0.01")).units.tolist() == [100, 100]
+        assert usd("-6000").calc_tiered_fee(TIERS) == usd("6000").calc_tiered_fee(TIERS) == usd("31.00")
+        assert usd("-100").calc_tiered_fee(Decimal("0.01"), min_fee=usd("5")) == usd("5.00")
+        assert usd("-100000").calc_tiered_fee(Decimal("0.01"), max_fee=usd("50")) == usd("50.00")
+        assert usd("-0.5").calc_tiered_fee(Decimal("0.01"), rounding="up") == usd("0.01")
+        with pytest.raises(OverflowError):
+            Money.from_units(-(2 ** 63), "USD").calc_tiered_fee(Decimal("0.01"))
 
     def test_tiers_round_once(self):
         # 各档 0.004 + 0.004 = 0.008：分别舍入为 0 + 0，一次舍入为 0.01
@@ -590,7 +626,7 @@ class TestTieredFee:
             exact, lower = Fraction(0), 0
             for t, r in tiers:
                 upper = None if t is None else int(t * 100)
-                x = max(amt, lower) if upper is None else min(max(amt, lower), upper)
+                x = max(abs(amt), lower) if upper is None else min(max(abs(amt), lower), upper)
                 exact += (x - lower) * Fraction(r)
                 lower = lower if upper is None else upper
             assert units(Money.from_units(amt, "USD").calc_tiered_fee(tiers, rounding=mode)) == ref_round(exact, mode)
@@ -651,3 +687,100 @@ class TestExportAndDisplay:
         assert str(usd("1.5")) == "1.50 USD"
         assert repr(usd("1.5")) == "Money(FixedArray(1.50, scale=2), currency='USD')"
         assert "1.50" in usd("1.5").format()
+
+
+# ===========================================================================
+# 12. 缺失值（NA）
+# ===========================================================================
+
+
+class TestMissingValues:
+    def test_arithmetic_propagates(self):
+        m = usd([None, "10.00", "-3.00"])
+        for got in (m + usd("1"), m - usd("1"), m * Decimal("1.5"), Decimal("1.5") * m, m / 4, m.multiply(None),
+                    m.divide(3, rounding="down"), m @ F([[1, 0, 0], [0, 1, 0], [0, 0, 1]])):
+            assert isinstance(got, Money) and got.scale == 2
+            assert got.isna()[0]
+        assert (m * None).isna().tolist() == [True, True, True] and (usd("1") / None).isna()
+        assert m.divide(usd("2")).isna().tolist() == [True, False, False]  # 比率
+        assert units(m * Decimal("1.5")) == [0, 1500, -450]
+
+    def test_step_rounding_keeps_missing_values(self):
+        m = usd([None, "10.00", "-3.00"])
+        got = m.multiply(Decimal("1.01"), step=Decimal("0.05"))
+        assert got.isna().tolist() == [True, False, False] and units(got) == [0, 1010, -305]
+        got = m.divide(3, step=Decimal("0.05"))
+        assert got.isna().tolist() == [True, False, False] and units(got) == [0, 335, -100]
+        assert m.round_to_step(Decimal("0.05")).isna().tolist() == [True, False, False]
+        assert m.is_on_step(Decimal("0.05")).tolist() == [False, True, True]
+
+    def test_step_cannot_be_missing(self):
+        for call in (lambda s: usd("1.23").round_to_step(s), lambda s: usd("1.23").is_on_step(s),
+                     lambda s: usd("1.23").multiply(2, step=s), lambda s: usd("1.23").divide(2, step=s)):
+            for step in (float("nan"), [Decimal("0.05"), None]):
+                with pytest.raises(ValueError, match="步长不能是缺失值"):
+                    call(step)
+        for call in (lambda: usd("1.23").round_to_step(None), lambda: usd("1.23").is_on_step(None)):
+            with pytest.raises(ValueError, match="步长不能是缺失值"):
+                call()
+        assert usd("1.23").multiply(2, step=None) == usd("2.46")  # multiply / divide 的 step=None 表示不对齐网格
+
+    def test_divmod_keeps_missing_values(self):
+        per, rest = divmod(usd([None, "10.00", "-1.00"]), 3)
+        assert per.isna().tolist() == [True, False, False] and units(per) == [0, 333, -34]
+        assert rest.isna().tolist() == [True, False, False] and units(rest) == [0, 1, 2]
+        count, rest = divmod(usd([None, "10.00"]), usd("3"))
+        assert count.isna().tolist() == [True, False] and rest.isna().tolist() == [True, False]
+
+    def test_allocate_rejects_missing_values(self):
+        with pytest.raises(ValueError, match="不能分配缺失的金额"):
+            usd(None).allocate([1, 1])
+        with pytest.raises(ValueError, match="分配权重不能是缺失值"):
+            usd("10").allocate([1, None])
+
+    def test_tiered_fee_propagates_missing_values(self):
+        m = usd([None, "100.00", "-6000"])
+        single = m.calc_tiered_fee(Decimal("0.01"), min_fee=usd("5"))
+        assert single.isna().tolist() == [True, False, False] and units(single) == [0, 500, 6000]
+        tiered = m.calc_tiered_fee(TIERS)
+        assert tiered.isna().tolist() == [True, False, False] and units(tiered) == [0, 100, 3100]
+        bounded = usd(["100", "200", "300"]).calc_tiered_fee(Decimal("0.01"), min_fee=usd([None, "5", "1"]),
+                                                             max_fee=usd(["9", "9", None]))
+        assert bounded.isna().tolist() == [True, False, True] and units(bounded) == [0, 500, 0]
+        assert usd(["100", "200"]).calc_tiered_fee(F([Decimal("0.01"), None])).isna().tolist() == [False, True]
+        # min > max 只检查两边都有效的位置
+        assert usd("1").calc_tiered_fee(Decimal("0.01"), min_fee=usd([None, "1"]), max_fee=usd(["0.5", "2"])).isna() \
+                   .tolist() == [True, False]
+        with pytest.raises(ValueError, match="min_fee 不能大于 max_fee"):
+            usd("1").calc_tiered_fee(Decimal("0.01"), min_fee=usd([None, "3"]), max_fee=usd(["0.5", "2"]))
+        with pytest.raises(ValueError, match="分档阈值不能是缺失值"):
+            usd("1").calc_tiered_fee([(usd(None), Decimal("0.1")), (None, Decimal("0.01"))])
+
+    def test_reductions(self):
+        m = usd([[None, "1.00"], ["2.00", "4.00"]])
+        assert m.sum() == usd("7") and m.sum(axis=1, skipna=False).isna().tolist() == [True, False]
+        assert m.mean() == usd("2.33") and m.mean(axis=1).isna().tolist() == [False, False]
+        assert m.mean(axis=1, skipna=False).isna().tolist() == [True, False]
+        assert units(m.mean(axis=1, skipna=False)) == [0, 300] and np.mean(m) == usd("2.33")
+        assert usd([None, None]).mean().isna()
+
+    def test_fillna_follows_money_construction_rules(self, no_warnings):
+        m = usd([None, "10.00"])
+        assert units(m.fillna(0)) == [0, 1000] and not m.fillna(0).isna().any()
+        assert units(m.fillna(1.005)) == [101, 1000]  # float：最短写法 half_up，静默
+        assert units(m.fillna(usd("7"))) == [700, 1000]
+        with pytest.raises(TypeError, match="币种不匹配"):
+            m.fillna(Money("7", "EUR"))
+        with pytest.raises(TypeError, match="填充值只接受数值"):
+            m.fillna("0")
+
+    def test_fillna_exact_input_beyond_precision_warns(self):
+        with pytest.warns(PrecisionLossWarning, match=r"超出指定 scale \(2\)"):
+            got = usd([None, "1"]).fillna(Decimal("1.005"))
+        assert units(got) == [101, 100]
+
+    def test_units_and_is_zero(self):
+        m = usd([None, "0", "1"])
+        assert units(m) == [0, 0, 100] and m.is_zero().tolist() == [False, True, False]  # units 在缺失位置为 0
+        assert m.dropna().units.tolist() == [0, 100]
+        assert str(usd([None, "1"])) == "[<NA>, 1.00] USD"

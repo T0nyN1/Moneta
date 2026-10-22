@@ -35,11 +35,13 @@ $$\text{m.scale} \equiv \text{m.currency.digits}, \qquad \text{真实金额} = \
 - **构造不接受 `scale` 参数**：金额的小数位数完全由所属 [`Currency.digits`](currency.md#currencydigits)
   决定。内部构造入口 [`Money._wrap`](#money_wrap) 会强制断言 `data.scale == currency.digits`，任何偏离都会抛出
   `ValueError`。
-- **浮点数静默舍入，精确输入超精度告警后舍入**：
+- **浮点数静默舍入，精确输入超精度告警后舍入**：构造器内部统一调用
+  `FixedArray(values, scale=curr.digits, on_excess="warn")`：
     - 当输入为 `float` 或浮点数组（`dtype.kind == "f"`）时，浮点数本身是近似值，直接按最短十进制写法以 `half_up` 静默舍入到
       `currency.digits`；
-    - 当输入为精确表示（`str`、`Decimal`、`Fraction`、`FixedArray` 或含这些元素的序列/`object` 数组）且小数位数超过
-      `currency.digits` 时，会先发出 [`PrecisionLossWarning`](#precisionlosswarning) 警告，再按 `half_up` 舍入到
+  - 当输入为精确表示（`str`、`Decimal`、`Fraction`、`FixedArray` 或含这些元素的序列/`object` 数组）且在多出的小数位上存在非零数字（缺失位置与末尾多余的
+    `0` 除外）时，由 `FixedArray` 发出 [`PrecisionLossWarning`](fixed_array.md#precisionlosswarning) 警告（告警位置自动指向用户调用代码），再按
+    `half_up` 舍入到
       `currency.digits`。
 
 ### 量纲代数与精度传播规则
@@ -55,7 +57,7 @@ $$\text{m.scale} \equiv \text{m.currency.digits}, \qquad \text{真实金额} = \
 | `m1 / m2`、`m1.divide(m2, rounding, scale)`     | 同币种 `Money`                 | [`FixedArray`](fixed_array.md) | 量纲相消为无量纲比率，默认保留 `currency.digits + 8` 位小数，可通过 `scale` 指定 |
 | `m / price`、`m.divide(price, rounding, scale)` | 同计价币种 [`Price`](price.md) | [`Quantity`](quantity.md)      | 金额除以单价得数量，默认保留 `currency.digits + 8` 位小数，可通过 `scale` 指定   |
 | `m / qty`、`m.divide(qty, rounding, scale)`     | [`Quantity`](quantity.md)      | [`Price`](price.md)            | 金额除以数量得单价，默认保留 `currency.digits + 8` 位小数，可通过 `scale` 指定   |
-| `m.mean(axis, keepdims, rounding)`              | —                              | `Money`                        | 沿轴求算术均值，按 `rounding` 舍入到 `currency.digits`                           |
+| `m.mean(axis, keepdims, rounding, skipna)`      | —                              | `Money`                        | 沿轴求算术均值（默认忽略 `<NA>`），按 `rounding` 舍入到 `currency.digits`        |
 | `m.round_to_step(step, rounding)`               | 正数步长                       | `Money`                        | 对齐到步长网格（`step` 精度不得超过 `currency.digits`）                          |
 | `divmod(m1, m2)`                                | 同币种 `Money`                 | `(int \| ndarray, Money)`      | 向下整除求可拆出的整数份数与剩余 `Money` 零头                                    |
 | `divmod(m, n)`                                  | 正整数 `n`                     | `(Money, Money)`               | 向下整除均分为 `n` 份，返回 `(每份金额, 剩余零头金额)`                           |
@@ -65,7 +67,8 @@ $$\text{m.scale} \equiv \text{m.currency.digits}, \qquad \text{真实金额} = \
 ### 操作数白名单与一步到位步长舍入
 
 - **操作数白名单**：所有接受无量纲系数的方法（`multiply`、`divide`、`matmul`、`round_to_step`、`is_on_step`、`allocate`、
-  `calc_tiered_fee`）内部统一通过 [`Money._as_factor`](#money_as_factor) 校验，只接受 `int`、`float`、`Decimal`、`Fraction`、
+  `calc_tiered_fee`）内部统一通过继承自基类的 [`UnitArray._as_factor`](unit_array.md#unitarray_as_factor) 校验，只接受
+  `int`、`float`、`Decimal`、`Fraction`、
   `FixedArray` 以及整数/浮点 `ndarray` 或序列， **拒绝字符串与布尔值**（运算符遇到未知类型返回 `NotImplemented`，方法直接抛
   `TypeError`）。
 - **一步到位步长舍入（消除二次舍入偏差）**：当在 [`multiply`](#moneymultiply) 或 [`divide`](#moneydivide) 中指定 `step`（例如
@@ -77,7 +80,6 @@ $$\text{m.scale} \equiv \text{m.currency.digits}, \qquad \text{真实金额} = \
 
 | 分类                   | 接口 / 运算符                                                                                  | 功能说明                                                                                  |
 |------------------------|------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------|
-| **警告类**             | [`PrecisionLossWarning`](#precisionlosswarning)                                                | 精确输入的小数位数超出币种精度并被舍入时发出的警告                                        |
 | **构造与工厂方法**     | [`Money(values, currency)`](#moneyvalues-currency)                                             | 从主货币单位数值、字符串、`Decimal`、`FixedArray` 或同币种 `Money` 构造                   |
 |                        | [`Money.from_units`](#moneyfrom_units)                                                         | 从最小原子单位（如“分”）的整数或整数数组构造（自动复制外部数组）                          |
 |                        | [`Money.zeros`](#moneyzeros-与-moneyones) / [`Money.ones`](#moneyzeros-与-moneyones)           | 构造指定形状的全 0 或全 1 主货币单位金额张量                                              |
@@ -108,57 +110,14 @@ $$\text{m.scale} \equiv \text{m.currency.digits}, \qquad \text{真实金额} = \
 |                        | [`Money._check_compatible`](#money_check_compatible)                                           | `UnitArray` 钩子：校验另一对象是否为同币种 `Money`                                        |
 |                        | [`Money._check_compatible_currency`](#money_check_compatible_currency)                         | 校验当前实例币种是否与目标 `Currency` 一致                                                |
 |                        | [`Money._wrap`](#money_wrap)                                                                   | 内部零拷贝构造器（强制校验 `data.scale == currency.digits`）                              |
-|                        | [`Money._as_factor`](#money_as_factor)                                                         | 校验无量纲数值白名单并转为 `FixedArray`                                                   |
+|                        | [`Money._fill_value`](#money_fill_value)                                                       | `UnitArray` 钩子：将 `fillna` 数值填充值按 `Money` 构造规则换算到币种精度                 |
 |                        | [`Money._as_step`](#money_as_step)                                                             | 校验正数步长且精度不超过币种精度                                                          |
 |                        | [`Money._fused_round_step`](#money_fused_round_step)                                           | 由 `step.scale + 1` 精度的下界与非精确标志一次性舍入到步长网格                            |
 |                        | [`_RATIO_EXTRA_DIGITS`](#_ratio_extra_digits)                                                  | 除法结果非 `Money` 时相对币种精度默认额外保留的小数位数（`8`）                            |
 
-## 警告类
-
-### PrecisionLossWarning
-
-```python
-class moneta.unit_array.PrecisionLossWarning(UserWarning)
-```
-
-当构造 `Money` 的精确输入（`str`、`Decimal`、`Fraction`、`FixedArray` 等）的小数位数超过目标币种精度 `currency.digits`、被自动按
-`half_up` 舍入时发出的警告。
-
-**机制说明**
-
-继承自内置 `UserWarning`。浮点数（`float` / `float64` 数组）因本身属于二进制近似值，在构造 `Money` 时直接按最短写法
-`half_up` 舍入而 **不发出**此警告；但字符串、[`Decimal`](https://docs.python.org/3/library/decimal.html)、[
-`Fraction`](https://docs.python.org/3/library/fractions.html) 与 [`FixedArray`](fixed_array.md)
-代表调用方显式给出的精确十进制数，一旦超出币种最小结算单位（例如向 2 位小数的 `USD` 传入 `"1.005"`），`Money` 会在执行
-`half_up` 舍入前发出 `PrecisionLossWarning`。在严格禁止隐式精度截断的场景下，可通过
-`warnings.simplefilter("error", PrecisionLossWarning)` 将其升级为异常。
-
-**示例**
-
-```python
->>> import warnings
->>> from moneta import Money
->>> from moneta import PrecisionLossWarning
->>> with warnings.catch_warnings(record=True) as w:
-...     warnings.simplefilter("always")
-...     m = Money("1.005", "USD")
-...     (m, len(w), issubclass(w[0].category, PrecisionLossWarning))
-(Money(FixedArray(1.01, scale=2), currency='USD'), 1, True)
->>> with warnings.catch_warnings():
-...     warnings.simplefilter("error", PrecisionLossWarning)
-...     Money("0.001", "USD")
-Traceback (most recent call last):
-    ...
-moneta.unit_array.PrecisionLossWarning: 输入的小数位数 (3) 超出 USD 的精度 (2)，已按 half_up 舍入
-```
-
-**另请参阅**
-
-- [`Money(values, currency)`](#moneyvalues-currency)
-
 ## 构造、工厂方法与核心属性
 
-### Money (values, currency)
+### `Money(values, currency)`
 
 ```python
 class moneta.Money(values, currency)
@@ -180,7 +139,7 @@ class moneta.Money(values, currency)
 
 **异常**
 
-- **TypeError** — `values` 是不支持的类型（如 `bool`、`None`），或 `values` 是不同币种的 `Money`；或传入了多余的 `scale=`
+- **TypeError** — `values` 是不支持的类型（如 `bool`），或 `values` 是不同币种的 `Money`；或传入了多余的 `scale=`
   关键字参数。
 - **KeyError** — `currency` 为未注册的货币代码字符串。
 - **ValueError** — `currency` 是与注册表同代码定义不一致的伪造 `Currency` 实例；或字符串/`Fraction` 无法解析为有限十进制数。
@@ -188,30 +147,32 @@ class moneta.Money(values, currency)
 
 **警告**
 
-- **[`PrecisionLossWarning`](#precisionlosswarning)** — 非浮点数的精确输入小数位数大于 `currency.digits` 时触发。
+- **[`PrecisionLossWarning`](fixed_array.md#precisionlosswarning)** — 非浮点数的精确输入在超出 `currency.digits`
+  的小数位上含有非零数字（缺失位置除外）时触发。
 
 **机制说明**
 
-构造器按以下分支解析输入并对齐到 `digits = curr.digits`：
+构造器将数值解析与精度对齐全部委托给底层 [`FixedArray`](fixed_array.md)：
 
 1. 先调用 [`get_currency(currency)`](currency.md#get_currency) 解析并校验币种单例 `curr`；
 2. 若 `values` 已是 `Money`：调用 [`values._check_compatible_currency(curr)`](#money_check_compatible_currency)
    校验币种一致后直接复用 `values._data`；
-3. 若 `values` 是 [`FixedArray`](fixed_array.md)：直接取 `data = values`；
-4. 若 `np.asarray(values).dtype.kind == "f"`（浮点标量或浮点数组）：调用 `FixedArray(values, scale=digits)`，直接按最短十进制写法
-   `half_up` 舍入到 `digits`（不产生更高精度的中间尾数，也不触发警告）；
-5. 其他精确输入（`int`、`str`、`Decimal`、`Fraction`、混合序列等）：先调用 `FixedArray(values)` 解析出完整精度 `data`；
-6. 若 `data.scale > digits`，发出 [`PrecisionLossWarning`](#precisionlosswarning)，最后统一调用
-   `data.rescale(digits, "half_up")` 绑定到 `self._data`。
+3. 否则直接执行 `self._data = FixedArray(values, scale=curr.digits, on_excess="warn")`：
+    - 浮点数按最短十进制写法 `half_up` 静默舍入到 `curr.digits`；
+    - 精确输入（`str`、`Decimal`、`Fraction`、`FixedArray` 及包含它们的序列）若多出的位只是末尾 `0`（如
+      `Money("1.500", "USD")`）或缺失位置，直接无损对齐；若多出的位含有非零数字，由 `FixedArray` 发出 [
+      `PrecisionLossWarning`](fixed_array.md#precisionlosswarning)（告警栈帧自动跳过 `moneta` 内部指向用户代码）后按
+      `half_up` 舍入。
 
 **示例**
 
 从精确输入与浮点数构造：
 
 ```python
+>>> import warnings
 >>> from decimal import Decimal
 >>> from fractions import Fraction
->>> from moneta import Money, USD, JPY
+>>> from moneta import Money, USD, JPY, PrecisionLossWarning
 >>> Money("12.34", "USD")
 Money(FixedArray(12.34, scale=2), currency='USD')
 >>> Money([1, Decimal("2.5"), Fraction(1, 4)], USD)
@@ -222,11 +183,28 @@ Money(FixedArray(1.01, scale=2), currency='USD')
 Money(FixedArray([0, -3], scale=0), currency='JPY')
 ```
 
+精确输入超出币种精度时发出 `PrecisionLossWarning` 后按 `half_up` 舍入（末尾多余的 `0` 不触发告警）：
+
+```python
+>>> with warnings.catch_warnings(record=True) as w:
+...     warnings.simplefilter("always")
+...     m_zero = Money("1.500", "USD")
+...     m_round = Money("1.005", "USD")
+...     (m_zero, m_round, len(w), issubclass(w[0].category, PrecisionLossWarning))
+(Money(FixedArray(1.50, scale=2), currency='USD'), Money(FixedArray(1.01, scale=2), currency='USD'), 1, True)
+>>> with warnings.catch_warnings():
+...     warnings.simplefilter("error", PrecisionLossWarning)
+...     Money("0.001", "USD")
+Traceback (most recent call last):
+    ...
+moneta.fixed_array.PrecisionLossWarning: 输入的小数位数 (3) 超出指定 scale (2)，已按 half_up 舍入
+```
+
 从已有 `Money` 构造（同币种复用，跨币种报错）：
 
 ```python
 >>> m = Money("15.00", "USD")
->>> Money(m, "usd") == m
+>>> bool(Money(m, "usd") == m)
 True
 >>> Money(m, "CNY")
 Traceback (most recent call last):
@@ -247,7 +225,7 @@ TypeError: 币种不匹配: USD 与 CNY
 **另请参阅**
 
 - [`Money.from_units`](#moneyfrom_units)
-- [`PrecisionLossWarning`](#precisionlosswarning)
+- [`PrecisionLossWarning`](fixed_array.md#precisionlosswarning)
 
 ### Money.from_units
 
@@ -497,7 +475,7 @@ TypeError: unsupported operand type(s) for +: 'Money' and 'int'
 - [`Money.sum`](#moneysum)
 - [`FixedArray` 加减法](fixed_array.md#a--b-与-a---b加减法)
 
-### +m、-m 与 abs (m)（正负号与绝对值）
+### `+m`、`-m` 与 `abs(m)`（正负号与绝对值）
 
 ```python
 +m
@@ -623,7 +601,7 @@ Money.multiply(other, rounding="half_up", step=None)
 
 - 当 `step is None` 时，直接委托 [
   `self._data.mul_round(factor, scale=self._currency.digits, rounding=mode)`](fixed_array.md#fixedarraymul_round)
-  ，即使中间乘积超出 `int64` 也会自动走 Base $10^9$ 分块长乘慢路径，只舍入一次。
+  ，即使中间乘积超出 `int64` 也会自动走 Base $2^{21}$ 分块长乘慢路径，只舍入一次。
 - 当给定 `step` 时，为避免“先舍入到 `currency.digits` 再舍入到 `step`”带来的二次舍入误差，先在精度 `t = step_fa.scale + 1`
   上分别用 `"floor"` 和 `"ceil"` 计算乘积下界 `floor` 与非精确掩码 `inexact = (floor != ceil)`，再交由 [
   `_fused_round_step`](#money_fused_round_step) 一次性裁决进位。
@@ -837,7 +815,7 @@ Money(FixedArray([30.00, 50.00], scale=2), currency='USD')
 ### Money.sum
 
 ```python
-Money.sum(axis=None, keepdims=False, out=None, dtype=None)
+Money.sum(axis=None, keepdims=False, skipna=True, out=None, dtype=None)
 ```
 
 沿指定轴对金额张量精确求和，结果保持原币种。调用 `np.sum(m, axis=..., keepdims=...)` 也会自动转发到此方法。
@@ -846,6 +824,8 @@ Money.sum(axis=None, keepdims=False, out=None, dtype=None)
 
 - **axis** : *int 或 tuple of int，可选* — 求和轴；默认 `None` 时对全部元素求和。
 - **keepdims** : *bool，默认 `False`* — 是否保留长度为 1 的规约轴。
+- **skipna** : *bool，默认 `True`* — 是否忽略缺失值 `<NA>`。为 `True` 时缺失位置按 `0` 处理；为 `False` 时若求和切片中含有
+  `<NA>`，该切片结果为 `<NA>`。
 - **out / dtype** : *None* — 兼容 NumPy 签名预留，必须为 `None`。
 
 **返回值**
@@ -855,7 +835,7 @@ Money.sum(axis=None, keepdims=False, out=None, dtype=None)
 **机制说明**
 
 直接继承自 [`UnitArray.sum`](unit_array.md#unitarraysum)，底层调用 [`FixedArray.sum`](fixed_array.md#fixedarraysum)（含
-Base $10^9$ 分块防中间溢出慢路径）。
+Base $2^{21}$ 分块防中间溢出慢路径与 `skipna` 缺失值处理）。
 
 **示例**
 
@@ -865,6 +845,9 @@ Base $10^9$ 分块防中间溢出慢路径）。
 Money(FixedArray(10.75, scale=2), currency='USD')
 >>> np.sum(m, axis=0)
 Money(FixedArray([4.50, 6.25], scale=2), currency='USD')
+>>> m_na = Money(["1.50", None, "2.50"], "USD")
+>>> m_na.sum(), m_na.sum(skipna=False)
+(Money(FixedArray(4.00, scale=2), currency='USD'), Money(FixedArray(<NA>, scale=2), currency='USD'))
 ```
 
 **另请参阅**
@@ -875,7 +858,7 @@ Money(FixedArray([4.50, 6.25], scale=2), currency='USD')
 ### Money.mean
 
 ```python
-Money.mean(axis=None, keepdims=False, rounding="half_up", out=None, dtype=None)
+Money.mean(axis=None, keepdims=False, rounding="half_up", skipna=True, out=None, dtype=None)
 ```
 
 沿指定轴计算算术平均金额，并按 `rounding` 舍入到币种精度。`np.mean(m, axis=..., keepdims=...)` 也会自动转发到此方法。
@@ -885,6 +868,8 @@ Money.mean(axis=None, keepdims=False, rounding="half_up", out=None, dtype=None)
 - **axis** : *int 或 tuple of int，可选* — 求均值的轴；默认 `None` 时对全部元素求均值。
 - **keepdims** : *bool，默认 `False`* — 是否保留规约轴。
 - **rounding** : *RoundingMode 或 str，默认 `"half_up"`* — 舍入模式。
+- **skipna** : *bool，默认 `True`* — 是否忽略缺失值 `<NA>`。为 `True` 时仅对有效非缺失元素求均值（若某切片全部为 `<NA>`
+  则该切片结果仍为 `<NA>`）；为 `False` 时含 `<NA>` 的切片结果为 `<NA>`。
 - **out / dtype** : *None* — 兼容 `np.mean` 签名预留，必须为 `None`。
 
 **返回值**
@@ -893,13 +878,15 @@ Money.mean(axis=None, keepdims=False, rounding="half_up", out=None, dtype=None)
 
 **异常**
 
-- **ValueError** — 在空数组上求均值，或 `rounding` 无效。
+- **ValueError** — 在空数组（`size == 0`）上求均值，或 `rounding` 无效。
 - **TypeError** — 传入了非 `None` 的 `out` 或 `dtype`。
 
 **机制说明**
 
-内部调用 `self._create_like(self._data.mean(axis=axis, keepdims=keepdims, rounding=rounding, out=out, dtype=dtype))`
-。底层先沿轴精确求和，再除以元素个数 `count` 并按 `rounding` 一次性舍入到 `self._data.scale`（即 `currency.digits`）。
+内部调用
+`self._create_like(self._data.mean(axis=axis, keepdims=keepdims, rounding=rounding, skipna=skipna, out=out, dtype=dtype))`
+。底层先沿轴对有效元素精确求和，再除以有效元素个数 `count` 并按 `rounding` 一次性舍入到 `self._data.scale`（即
+`currency.digits`）。
 
 **示例**
 
@@ -910,6 +897,9 @@ Money(FixedArray(2.33, scale=2), currency='USD')
 Money(FixedArray(0.01, scale=2), currency='USD')
 >>> np.mean(Money(["1.00", "2.00"], "USD"))
 Money(FixedArray(1.50, scale=2), currency='USD')
+>> > m_na = Money(["1.00", None, "2.00"], "USD")
+>> > m_na.mean(), m_na.mean(skipna=False)
+(Money(FixedArray(1.50, scale=2), currency='USD'), Money(FixedArray( < NA >, scale=2), currency='USD'))
 ```
 
 **性能对比**
@@ -1007,7 +997,8 @@ Money.is_on_step(step)
 
 **机制说明**
 
-先通过 [`_as_factor(step, "步长")`](#money_as_factor) 转为 `FixedArray`，再委托 [
+先通过 [`_as_grid(step, "步长")`](unit_array.md#unitarray_as_grid-与-unitarray_fill_value) 转为不含缺失值的 `FixedArray`
+，再委托 [
 `self._data.is_on_step(...)`](fixed_array.md#fixedarrayis_on_step) 对齐 `scale` 后检查尾数余数是否为 0。
 
 **示例**
@@ -1055,7 +1046,7 @@ array([ True, False])
 
 ## 守恒整除、比例分配与阶梯费用
 
-### divmod (m, other)（守恒带余整除）
+### `divmod(m, other)`（守恒带余整除）
 
 ```python
 divmod(m, other)
@@ -1104,7 +1095,7 @@ $$\text{商} \times \text{other} + \text{零头} \equiv m$$
 ```python
 >>> count, rest = divmod(Money("10.00", "USD"), Money("3.00", "USD"))
 >>> count, rest
-(3, Money(FixedArray(1.00, scale=2), currency='USD'))
+(FixedArray(3, scale=0), Money(FixedArray(1.00, scale=2), currency='USD'))
 ```
 
 模式 2：除以正整数 `n`（均分为 `n` 份与剩余零头）：
@@ -1163,7 +1154,8 @@ Money.allocate(ratios)
 
 **机制说明**
 
-1. 先调用 [`self._as_factor(ratios, "分配权重")`](#money_as_factor) 将整组权重统一对齐到共同 `scale` 的 `FixedArray`
+1. 先调用 [`self._as_factor(ratios, "分配权重")`](unit_array.md#unitarray_as_factor) 将整组权重统一对齐到共同 `scale` 的
+   `FixedArray`
    ，取其整数尾数列表 `weights = [int(w) for w in weights_fa.mantissa]`（由于所有权重同乘 $10^{\text{scale}}$
    不改变相对比例，浮点数、小数 `Decimal` 与有限 `Fraction` 都会被无损化为精确整数比！）。
 2. 设待分配的原子单位总数为 $T = \text{int (self.mantissa)}$，总权重为 $W = \sum w_i$。对每个权重计算向下整除商与正余数：
@@ -1252,7 +1244,7 @@ Money(FixedArray([5.00, 5.00, 50.00], scale=2), currency='USD')
 ...     (None, Decimal("0.001")),
 ... ]
 >>> Money(["500.00", "6000.00", "-200.00"], "USD").calc_tiered_fee(tiers)
-Money(FixedArray([5.00, 31.00, 0.00], scale=2), currency='USD')
+Money(FixedArray([5.00, 31.00, 2.00], scale=2), currency='USD')
 ```
 
 各档费用先精确累加再一次性舍入（`0.004 + 0.004 = 0.008 -> 0.01`）：
@@ -1393,7 +1385,7 @@ True
 
 - [`str(m)` 与 `repr(m)`](#strm-与-reprm文本表示)
 
-### str (m) 与 repr (m)（文本表示）
+### `str(m)` 与 `repr(m)`（文本表示）
 
 ```python
 str(m)
@@ -1572,48 +1564,35 @@ ValueError: 内部错误：金额精度 3 与 USD 的精度 2 不一致
 - [`Money._create_like`](#money_create_like)
 - [`Money.from_units`](#moneyfrom_units)
 
-### Money._as_factor
+### Money._fill_value
 
 ```python
-@staticmethod
-Money._as_factor(other, what)
+Money._fill_value(value)
 ```
 
-校验 `other` 是否属于无量纲数值操作数白名单，并将其转换为 [`FixedArray`](fixed_array.md)。
-
-**参数**
-
-- **other** : *Any* — 待校验的无量纲操作数。
-- **what** : *str* — 用于拼装错误提示的角色名称（如 `"乘数"`、`"除数"`、`"权重"`、`"步长"`、`"分配权重"`、`"费率"`、`"阈值"`）。
-
-**返回值**
-
-- **out** : *FixedArray*
-
-**异常**
-
-- **TypeError** — `FixedArray._is_numeric_operand(other)` 为 `False`（例如传入字符串、布尔值、`Money` 或其他对象）。
-
-**机制说明**
-
-调用 [`FixedArray._is_numeric_operand(other)`](fixed_array.md#fixedarray_is_numeric_operand) 检查白名单，通过后调用 [
-`FixedArray._coerce(other)`](fixed_array.md#fixedarray_coerce) 转为 `FixedArray`。
+覆盖 [`UnitArray._fill_value`](unit_array.md#unitarray_as_grid-与-unitarray_fill_value) 钩子：先调用 [
+`self._as_factor(value, "填充值")`](unit_array.md#unitarray_as_factor) 校验 `value` 在无量纲数值白名单内，再通过
+`Money(value, self._currency)._data` 按 `Money` 的构造规则换算到当前币种精度（`float`
+静默舍入，精确输入超出币种精度时发出 [`PrecisionLossWarning`](fixed_array.md#precisionlosswarning) 后按 `half_up` 舍入）。
 
 **示例**
 
 ```python
->>> Money._as_factor(1.5, "乘数")
-FixedArray(1.5, scale=1)
->>> Money._as_factor("1.5", "乘数")
+>> > m = Money(["1.00", None], "USD")
+>> > m._fill_value(2.5)
+FixedArray(2.50, scale=2)
+>> > m.fillna("2.5")
 Traceback (most recent call last):
     ...
-TypeError: 乘数只接受数值（int、float、Decimal、Fraction、FixedArray 或数值数组），收到 str
+TypeError: 填充值只接受数值（int、float、Decimal、Fraction、FixedArray
+或数值数组），收到
+str
 ```
 
 **另请参阅**
 
+- [`UnitArray.fillna`](unit_array.md#unitarrayfillna)
 - [`Money._as_step`](#money_as_step)
-- [`FixedArray._is_numeric_operand`](fixed_array.md#fixedarray_is_numeric_operand)
 
 ### Money._as_step
 
@@ -1693,7 +1672,7 @@ Money._fused_round_step(floor, inexact, step, mode)
     - $v$ 存在非零小数余量当且仅当 `(r != 0) | inexact`；
     - $v$ 严格超过半步长当且仅当 `(r > unit - r) | ((r == unit - r) & inexact)`；
     - $v$ 恰好落在半步长中点当且仅当 `(r == unit - r) & ~inexact`。
-- 将上述布尔条件送入 [`FixedArray._decide_bump(..., floor_base=True)`](fixed_array.md#fixedarray_decide_bump)，即可一步求得精确步数
+- 将上述布尔条件送入 [`decide_bump(..., floor_base=True)`](_rounding.md#decide_bump)，即可一步求得精确步数
   `q + bump`，再乘以 `step` 并 `rescale` 到币种精度。
 
 **示例**
@@ -1713,7 +1692,7 @@ FixedArray(0.10, scale=2)
 
 - [`Money.multiply`](#moneymultiply)
 - [`Money.divide`](#moneydivide)
-- [`FixedArray._decide_bump`](fixed_array.md#fixedarray_decide_bump)
+- [`decide_bump`](_rounding.md#decide_bump)
 
 ### _RATIO_EXTRA_DIGITS
 

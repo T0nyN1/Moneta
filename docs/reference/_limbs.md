@@ -6,17 +6,17 @@
 任意精度大整数，也绝不发生硬件溢出回绕。
 
 ```python
->> > import numpy as np
->> > from moneta._limbs import split_int64, normalize_limbs, limbs_mul, limbs_matmul, limbs_sum, limbs_round_div_pow10,
-    limbs_to_int64
->> > big = np.array([10 ** 15, -10 ** 15], dtype=np.int64)
->> > prod_limbs = limbs_mul(big, np.array([10 ** 6, 10 ** 6], dtype=np.int64))  # 中间积 10^21 > 2^63 - 1
->> > div_limbs = limbs_round_div_pow10(prod_limbs, k=6, mode="half_up")  # 在分块上除以 10^6 并舍入
->> > limbs_to_int64(div_limbs).tolist()  # 落回 int64 范围，精确无溢出
+>>> import numpy as np
+>>> from moneta._limbs import split_int64, normalize_limbs, limbs_mul, limbs_matmul
+>>> from moneta._limbs import limbs_sum, limbs_round_div_pow10, limbs_to_int64
+>>> big = np.array([10 ** 15, -10 ** 15], dtype=np.int64)
+>>> prod_limbs = limbs_mul(big, np.array([10 ** 6, 10 ** 6], dtype=np.int64))  # 中间积 10^21 > 2^63 - 1
+>>> div_limbs = limbs_round_div_pow10(prod_limbs, k=6, mode="half_up")  # 在分块上除以 10^6 并舍入
+>>> limbs_to_int64(div_limbs).tolist()  # 落回 int64 范围，精确无溢出
 [1000000000000000, -1000000000000000]
->> >  # 正负相抵的大数求和：中间部分和超出 int64，但最终和为 -1
->> > MAX, MIN = (1 << 63) - 1, -(1 << 63)
->> > int(limbs_sum(np.array([MAX, MAX, MIN, MIN + 1], dtype=np.int64)))
+>>>  # 正负相抵的大数求和：中间部分和超出 int64，但最终和为 -1
+>>> MAX, MIN = (1 << 63) - 1, -(1 << 63)
+>>> int(limbs_sum(np.array([MAX, MAX, MIN, MIN + 1], dtype=np.int64)))
 -1
 ```
 
@@ -372,12 +372,12 @@ moneta._limbs.limbs_sum(arr, axis=None, keepdims=False)
 **示例**
 
 ```python
->> > import numpy as np
->> > from moneta._limbs import limbs_sum
->> > MAX, MIN = (1 << 63) - 1, -(1 << 63)
->> > int(limbs_sum(np.array([MAX, MAX, MIN, MIN], dtype=np.int64)))
+>>> import numpy as np
+>>> from moneta._limbs import limbs_sum
+>>> MAX, MIN = (1 << 63) - 1, -(1 << 63)
+>>> int(limbs_sum(np.array([MAX, MAX, MIN, MIN], dtype=np.int64)))
 -2
->> > limbs_sum(np.array([[MAX, 1], [MIN, 2]], dtype=np.int64), axis=0).tolist()
+>>> limbs_sum(np.array([[MAX, 1], [MIN, 2]], dtype=np.int64), axis=0).tolist()
 [-1, 3]
 ```
 
@@ -436,12 +436,12 @@ moneta._limbs.limbs_round_div_pow10(limbs, k, mode="half_up")
 **示例**
 
 ```python
->> > import numpy as np
->> > from moneta._limbs import split_int64, limbs_round_div_pow10, limbs_to_int64
->> > vs = np.array([25, -25, 35, -35], dtype=np.int64)
->> > limbs_to_int64(limbs_round_div_pow10(split_int64(vs), k=1, mode="half_even")).tolist()
+>>> import numpy as np
+>>> from moneta._limbs import split_int64, limbs_round_div_pow10, limbs_to_int64
+>>> vs = np.array([25, -25, 35, -35], dtype=np.int64)
+>>> limbs_to_int64(limbs_round_div_pow10(split_int64(vs), k=1, mode="half_even")).tolist()
 [2, -2, 4, -4]
->> > limbs_to_int64(limbs_round_div_pow10(split_int64(vs), k=1, mode="half_up")).tolist()
+>>> limbs_to_int64(limbs_round_div_pow10(split_int64(vs), k=1, mode="half_up")).tolist()
 [3, -3, 4, -4]
 ```
 

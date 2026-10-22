@@ -91,6 +91,10 @@ class TestConstruct:
         p = Price(values, "USD", scale=scale)
         assert (p.mantissa.tolist() if p.ndim else int(p.mantissa), p.scale) == (mantissa, scale)
 
+    def test_trailing_zeros_do_not_warn(self, no_warnings):
+        assert Price("10.2500", "USD", scale=2).mantissa == 1025
+        assert Price(["1.10", "2.000"], "USD", scale=1).mantissa.tolist() == [11, 20]
+
     @pytest.mark.parametrize("values, scale, mantissa", [("1.234", 2, 123), (Decimal("1.235"), 2, 124),
                                                          (F("1.234"), 2, 123), (Fraction(1, 8), 2, 13)])
     def test_exact_input_beyond_scale_warns_then_rounds(self, values, scale, mantissa):
@@ -183,9 +187,14 @@ class TestTick:
         with pytest.raises(ValueError, match="rounding 只能是"):
             p.round_to_step(rounding="nearest")
 
-    def test_per_element_ticks(self):
-        p = Price(["10.23", "10.23"], "USD", tick_size=[Decimal("0.05"), Decimal("0.10")])
-        assert np.all(p.round_to_step() == Price(["10.25", "10.20"], "USD"))
+    def test_tick_must_be_scalar(self):
+        with pytest.raises(ValueError, match="tick_size 必须是标量"):
+            Price(["10.23", "10.23"], "USD", tick_size=[Decimal("0.05"), Decimal("0.10")])
+        # 逐元素网格显式传 step，切片、反转后照常对齐
+        p = Price(["10.23", "10.23"], "USD")
+        step = [Decimal("0.05"), Decimal("0.10")]
+        assert np.all(p.round_to_step(step) == Price(["10.25", "10.20"], "USD"))
+        assert p.is_on_step(step).tolist() == [False, False]
 
     def test_without_tick(self):
         p = Price("1.234", "USD")
@@ -296,7 +305,7 @@ class TestMultiply:
             got = raw(a, sa).multiply(q, rounding=mode)
             assert got.currency is USD and int(got.units) == ref_round(Fraction(a * b, 10 ** (sa + sb)) * 100, mode)
 
-    @pytest.mark.parametrize("bad", ["2", True, None, Money("1", "USD"), Price("2", "USD")])
+    @pytest.mark.parametrize("bad", ["2", True, Money("1", "USD"), Price("2", "USD")])
     def test_rejects_non_numeric(self, bad):
         assert Price("1", "USD").__mul__(bad) is NotImplemented and Price("1", "USD").__rmul__(bad) is NotImplemented
         with pytest.raises(TypeError):
@@ -376,7 +385,7 @@ class TestDivide:
         with pytest.raises(TypeError, match="数值或同类 Price"):
             Price("1", "USD").divide(bad)
 
-    @pytest.mark.parametrize("bad", ["2", True, None])
+    @pytest.mark.parametrize("bad", ["2", True])
     def test_rejects_non_numeric(self, bad):
         assert Price("1", "USD").__truediv__(bad) is NotImplemented
         with pytest.raises(TypeError, match="只接受数值"):
@@ -418,3 +427,46 @@ class TestExportAndDisplay:
     def test_repr_str(self):
         assert str(Price("1.5", "USD", base_unit="barrel")) == "1.5 USD/barrel"
         assert repr(Price("1.5", "USD")) == "Price(FixedArray(1.5, scale=1), quote_currency='USD', base_unit='share')"
+
+
+# ===========================================================================
+# 缺失值（NA）
+# ===========================================================================
+
+
+class TestMissingValues:
+    def test_construct_and_propagate(self, no_warnings):
+        p = Price([None, "10.25", float("nan")], "USD", base_unit="barrel", tick_size=TICK)
+        assert p.isna().tolist() == [True, False, True] and p.tick_size == F("0.01") and Price(None, "USD").isna()
+        assert Price([F("1.5"), 2], "USD", scale=2).mantissa.tolist() == [150, 200]  # 含 FixedArray 元素的序列
+        for got in (p * 2, 2 * p, p + Price("1", "USD", base_unit="barrel", tick_size=TICK), p / 4, -p):
+            assert isinstance(got, Price) and got.base_unit == "barrel" and got.isna().tolist() == [True, False, True]
+        assert (p * None).isna().tolist() == [True, True, True] and (Price("1", "USD") / None).isna()
+        assert (p / Price("2", "USD", base_unit="barrel")).isna().tolist() == [True, False, True]  # 比率
+        total = p * Quantity([1, None, 2], unit="barrel")
+        assert isinstance(total, Money) and total.isna().tolist() == [True, True, True]
+
+    def test_tick_and_steps(self):
+        p = Price([None, "10.23"], "USD", tick_size=Decimal("0.05"))
+        assert p.round_to_step().isna().tolist() == [True, False] and p.round_to_step().mantissa.tolist() == [0, 1025]
+        assert p.is_on_step().tolist() == [False, False] and p.is_on_step(TICK).tolist() == [False, True]
+        no_tick = Price([None, "1.5"], "USD")
+        assert no_tick.is_on_step().tolist() == [False, True]  # 没有 tick：缺失值之外都在网格上
+        assert Price("1.5", "USD").is_on_step() is True and Price(None, "USD").is_on_step() is False
+        for tick in (None, float("nan")):
+            if tick is not None:
+                with pytest.raises(ValueError, match="tick_size 不能是缺失值"):
+                    Price("1", "USD", tick_size=tick)
+            with pytest.raises(ValueError, match="step 不能是缺失值"):
+                Price("1", "USD").round_to_step(step=[Decimal("0.05"), tick])
+        with pytest.raises(ValueError, match="step 不能是缺失值"):
+            Price("1", "USD").is_on_step(step=float("nan"))
+
+    def test_fillna_keeps_tick_and_unit(self):
+        p = Price([None, "2"], "USD", base_unit="barrel", tick_size=TICK)
+        got = p.fillna(1)
+        assert got.mantissa.tolist() == [1, 2] and got.tick_size == F("0.01") and got.base_unit == "barrel"
+        assert p.fillna(Price("1.5", "USD", base_unit="Any")).mantissa.tolist() == [15, 20]
+        with pytest.raises(TypeError, match="价格量纲不匹配"):
+            p.fillna(Price("1", "EUR", base_unit="barrel"))
+        assert p.dropna().mantissa.tolist() == [2] and p.dropna().tick_size == F("0.01")

@@ -99,6 +99,11 @@ class TestConstruct:
             q = Quantity(values, scale=scale)
         assert (q.mantissa.tolist() if q.ndim else int(q.mantissa), q.scale) == (mantissa, scale)
 
+    def test_trailing_zeros_do_not_warn(self, no_warnings):
+        assert Quantity("1.50", scale=1).mantissa == 15
+        assert Quantity(["2.000", "-3.10"], scale=1).mantissa.tolist() == [20, -31]
+        assert Quantity(F._from_mantissa(0, 40), scale=0).mantissa == 0
+
     def test_scale_pads(self, no_warnings):
         assert (int(Quantity("1.5", scale=4).mantissa), Quantity(2, scale=3).scale) == (15000, 3)
 
@@ -116,7 +121,7 @@ class TestConstruct:
         with pytest.raises(TypeError, match="单位不匹配"):
             Quantity(q, unit="share")
 
-    @pytest.mark.parametrize("bad", [True, None, object(), np.array([True])])
+    @pytest.mark.parametrize("bad", [True, object(), np.array([True])])
     def test_invalid_values(self, bad):
         with pytest.raises((TypeError, ValueError)):
             Quantity(bad)
@@ -216,7 +221,7 @@ class TestMultiply:
                 with pytest.raises(OverflowError):
                     q.multiply(f, scale=t, rounding=mode)
 
-    @pytest.mark.parametrize("bad", ["2", True, None, Quantity(2), Money("1", "USD")])
+    @pytest.mark.parametrize("bad", ["2", True, Quantity(2), Money("1", "USD")])
     def test_rejects_non_numeric(self, bad):
         assert Quantity(3).__mul__(bad) is NotImplemented and Quantity(3).__rmul__(bad) is NotImplemented
         with pytest.raises(TypeError):
@@ -270,7 +275,7 @@ class TestDivide:
         with pytest.raises(TypeError, match="数值或同单位"):
             Quantity(1).divide(bad)
 
-    @pytest.mark.parametrize("bad", ["2", True, None])
+    @pytest.mark.parametrize("bad", ["2", True])
     def test_rejects_non_numeric(self, bad):
         assert Quantity(1).__truediv__(bad) is NotImplemented
         with pytest.raises(TypeError):
@@ -352,3 +357,42 @@ class TestExportAndDisplay:
     def test_exports(self):
         import moneta
         assert moneta.Quantity is Quantity and moneta.PrecisionLossWarning is PrecisionLossWarning
+
+
+# ===========================================================================
+# 缺失值（NA）
+# ===========================================================================
+
+
+class TestMissingValues:
+    def test_construct_and_propagate(self, no_warnings):
+        q = Quantity([None, "1.5", float("nan")], unit="BTC")
+        assert q.isna().tolist() == [True, False, True] and q.unit == "BTC" and Quantity(None).isna()
+        assert Quantity([None, "1.20"], scale=1).isna().tolist() == [True, False]  # 末尾的 0 不算丢精度
+        assert Quantity([F("1.5"), 2], scale=2).mantissa.tolist() == [150, 200]  # 含 FixedArray 元素的序列
+        with pytest.warns(PrecisionLossWarning):
+            Quantity([F("1.25"), 2], scale=1)  # 精确输入：丢精度要告警
+        for got in (q * 2, 2 * q, q + Quantity("1", unit="BTC"), q.multiply(Decimal("0.1"), scale=1), q / 2):
+            assert isinstance(got, Quantity) and got.unit == "BTC" and got.isna().tolist() == [True, False, True]
+        assert (q * None).isna().tolist() == [True, True, True] and (Quantity(1) / None).isna()
+        assert (q / Quantity("0.5", unit="BTC")).isna().tolist() == [True, False, True]  # 比率
+        assert (Price("2", "USD", base_unit="BTC") * q).isna().tolist() == [True, False, True]  # → Money
+
+    def test_steps(self):
+        q = Quantity([None, "150", "249"])
+        assert q.round_to_step(100, "down").isna().tolist() == [True, False, False]
+        assert q.round_to_step(100, "down").mantissa.tolist() == [0, 100, 200]
+        assert q.is_on_step(50).tolist() == [False, True, False]
+        for call in (lambda s: Quantity(5).round_to_step(s), lambda s: Quantity(5).is_on_step(s)):
+            for step in (None, float("nan"), [1, None]):
+                with pytest.raises(ValueError, match="步长不能是缺失值"):
+                    call(step)
+
+    def test_fillna_dropna_and_wildcard(self):
+        q = Quantity([None, "2"], unit="BTC")
+        assert q.fillna(Decimal("0.5")).mantissa.tolist() == [5, 20] and q.fillna(0).unit == "BTC"
+        assert q.fillna(Quantity("0.5", unit=WILDCARD_UNIT)).unit == "BTC"  # 通配单位兼容
+        with pytest.raises(TypeError, match="单位不匹配"):
+            q.fillna(Quantity(1, unit="ETH"))
+        assert q.dropna().mantissa.tolist() == [2] and q.dropna().unit == "BTC"
+        assert q.sum(skipna=False).isna() and q.sum() == Quantity(2, unit="BTC")

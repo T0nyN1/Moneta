@@ -1,6 +1,7 @@
 # FixedArray — 定点数张量引擎
 
-`moneta.FixedArray` 是基于 `int64` 尾数的定点数 N 维数组，`moneta.RoundingMode` 是配套的舍入模式枚举。
+`moneta.FixedArray` 是基于 `int64` 尾数的定点数 N 维数组，`moneta.RoundingMode` 是配套的舍入模式枚举，
+`moneta.PrecisionLossWarning` 是精确输入超出目标精度并被舍入时发出的警告。
 它们是 Moneta 全部精确运算的数值内核：加减乘、求和、矩阵乘法全程走整数运算，
 不会产生 IEEE 754 浮点累积误差；舍入只在你明确要求的地方、按你指定的规则发生一次；
 结果超出 `int64` 时一定报错，不会静默回绕。
@@ -90,79 +91,81 @@ $$v = \text{mantissa} \times 10^{-\text{scale}}$$
 
 ## API 速查表
 
-| 分类                   | 接口 / 运算符                                                                                                                                                                                                                                                                                                                                  | 功能说明                                                                 |
-|------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------|
-| **舍入模式**           | [`RoundingMode`](#roundingmode)                                                                                                                                                                                                                                                                                                                | 六种金融与会计舍入模式枚举                                               |
-| **构造与属性**         | [`FixedArray(values, scale=None, mask=None)`](#fixedarrayvalues-scalenone-masknone)                                                                                                                                                                                                                                                            | 从数值、字符串、`Decimal`、`Fraction`、数组构造                          |
-|                        | [`FixedArray.mantissa`](#fixedarraymantissa)                                                                                                                                                                                                                                                                                                   | 只读 `int64` 尾数数组视图                                                |
-|                        | [`FixedArray.scale`](#fixedarrayscale)                                                                                                                                                                                                                                                                                                         | 全局十进制小数位数                                                       |
-|                        | [`FixedArray.shape`](#fixedarrayshape) / [`ndim`](#fixedarrayndim) / [`size`](#fixedarraysize) / [`dtype`](#fixedarraydtype)                                                                                                                                                                                                                   | 形状、维数、元素总数、尾数数据类型                                       |
-|                        | [`FixedArray.T`](#fixedarrayt)                                                                                                                                                                                                                                                                                                                 | 反转全部轴的转置视图                                                     |
-| **缺失值（NA）处理**   | [`FixedArray.mask`](#fixedarraymask)                                                                                                                                                                                                                                                                                                           | 只读缺失值布尔掩码视图（无缺失值时为 `None`）                            |
-|                        | [`FixedArray.isna`](#fixedarrayisnafixedarrayisnullfixedarraynotna-与-fixedarraynotnull) / [`isnull`](#fixedarrayisnafixedarrayisnullfixedarraynotna-与-fixedarraynotnull) / [`notna`](#fixedarrayisnafixedarrayisnullfixedarraynotna-与-fixedarraynotnull) / [`notnull`](#fixedarrayisnafixedarrayisnullfixedarraynotna-与-fixedarraynotnull) | 返回标记缺失位置或有效数值位置的布尔矩阵                                 |
-|                        | [`FixedArray.fillna`](#fixedarrayfillna)                                                                                                                                                                                                                                                                                                       | 用指定数值填充缺失位置                                                   |
-|                        | [`FixedArray.dropna`](#fixedarraydropna)                                                                                                                                                                                                                                                                                                       | 丢弃 1 维向量中的缺失值                                                  |
-| **算术运算**           | [`+a`、`-a`](#a-与--a一元正负号)                                                                                                                                                                                                                                                                                                               | 一元正负号                                                               |
-|                        | [`abs(a)`](#absa绝对值)                                                                                                                                                                                                                                                                                                                        | 逐元素绝对值                                                             |
-|                        | [`a + b`、`a - b`](#a--b-与-a---b加减法)                                                                                                                                                                                                                                                                                                       | 逐元素加减法，自动对齐 scale                                             |
-|                        | [`a * b`](#a--b精确乘法)                                                                                                                                                                                                                                                                                                                       | 逐元素精确乘法（scale 相加）                                             |
-|                        | [`FixedArray.mul_round`](#fixedarraymul_round)                                                                                                                                                                                                                                                                                                 | 融合乘法 + 一次舍入                                                      |
-|                        | [`a / b`](#a--b真除法)                                                                                                                                                                                                                                                                                                                         | 逐元素真除法（默认保留 `max(scale)` 位并 `half_up`）                     |
-|                        | [`FixedArray.divide`](#fixedarraydivide)                                                                                                                                                                                                                                                                                                       | 指定目标 scale 与舍入模式的精确除法                                      |
-|                        | [`a // b`、`a % b`、`divmod(a, b)`](#a--ba--b-与-divmoda-b整除与取余)                                                                                                                                                                                                                                                                          | 向下整除（返回 `scale=0` 的 `FixedArray`）、取余与带余除法               |
-| **矩阵运算**           | [`a @ b`](#a--b精确矩阵乘法)                                                                                                                                                                                                                                                                                                                   | 精确矩阵乘法（scale 相加）                                               |
-|                        | [`FixedArray.matmul`](#fixedarraymatmul)                                                                                                                                                                                                                                                                                                       | 矩阵乘法 + 一次舍入                                                      |
-| **规约统计**           | [`FixedArray.sum`](#fixedarraysum)                                                                                                                                                                                                                                                                                                             | 沿轴精确求和（支持 `skipna=True`）                                       |
-|                        | [`FixedArray.mean`](#fixedarraymean)                                                                                                                                                                                                                                                                                                           | 沿轴求算术均值并精确舍入（支持 `skipna=True`）                           |
-| **精度与网格**         | [`FixedArray.rescale`](#fixedarrayrescale)                                                                                                                                                                                                                                                                                                     | 调整小数位数                                                             |
-|                        | [`FixedArray.round_to_step`](#fixedarrayround_to_step)                                                                                                                                                                                                                                                                                         | 对齐到步长网格（最小变动价位、整手）                                     |
-|                        | [`FixedArray.is_on_step`](#fixedarrayis_on_step)                                                                                                                                                                                                                                                                                               | 逐元素判断是否落在步长网格上                                             |
-| **比较运算**           | [`a == b`、`a != b`](#a--b-与-a--b相等性比较)                                                                                                                                                                                                                                                                                                  | 无溢出跨 scale 逐元素判断相等或不等                                      |
-|                        | [`a < b`、`a <= b`、`a > b`、`a >= b`](#a--ba--ba--ba--b大小比较)                                                                                                                                                                                                                                                                              | 无溢出跨 scale 逐元素比较大小                                            |
-| **形状与协议**         | [`FixedArray.reshape`](#fixedarrayreshape)                                                                                                                                                                                                                                                                                                     | 不复制数据改变数组形状                                                   |
-|                        | [`FixedArray.transpose`](#fixedarraytranspose)                                                                                                                                                                                                                                                                                                 | 按指定顺序置换各轴                                                       |
-|                        | [`FixedArray.swapaxes`](#fixedarrayswapaxes-与-fixedarraysqueeze) / [`FixedArray.squeeze`](#fixedarrayswapaxes-与-fixedarraysqueeze)                                                                                                                                                                                                           | 交换两个轴 / 移除长度为 1 的轴                                           |
-|                        | [`a[key]`](#akey索引与切片)                                                                                                                                                                                                                                                                                                                    | 索引、切片、布尔掩码与花式索引                                           |
-|                        | [`len(a)`、`bool(a)`、`iter(a)`](#lenaboola-与-itera容器与真值协议)                                                                                                                                                                                                                                                                            | 首维长度、单元素真值测试与按首维迭代                                     |
-| **导出与互操作**       | [`FixedArray.to_float`](#fixedarrayto_float)                                                                                                                                                                                                                                                                                                   | 导出为 `float` / `float64` 数组（缺失值转 `nan`）                        |
-|                        | [`FixedArray.to_decimal`](#fixedarrayto_decimal)                                                                                                                                                                                                                                                                                               | 导出为 `Decimal` / `object` 数组（缺失值转 `None`）                      |
-|                        | [`FixedArray.to_pandas`](#fixedarrayto_pandas)                                                                                                                                                                                                                                                                                                 | 导出为 `pandas.Series` / `DataFrame`                                     |
-|                        | [`FixedArray.to_polars`](#fixedarrayto_polars)                                                                                                                                                                                                                                                                                                 | 导出为 `polars.Series`                                                   |
-|                        | [`str(a)`、`repr(a)`](#stra-与-repra文本表示)                                                                                                                                                                                                                                                                                                  | 按 scale 补零的精确文本表示（缺失值显示 `<NA>`）                         |
-|                        | [NumPy 互操作机制](#numpy-互操作机制)                                                                                                                                                                                                                                                                                                          | 可用与被禁止的 NumPy 函数（含 `np.array_equal`）、常见写法配方           |
-| **内部构造与转换**     | [`FixedArray._set`](#fixedarray_set)                                                                                                                                                                                                                                                                                                           | 构造收口：绑定只读 `int64` 尾数视图、`scale` 与只读 `mask`               |
-|                        | [`FixedArray._from_mantissa`](#fixedarray_from_mantissa)                                                                                                                                                                                                                                                                                       | 由已有 `int64` 尾数、`scale` 与可选 `mask` 零拷贝构造                    |
-|                        | [`FixedArray._combine_masks`](#fixedarray_combine_masks-与-fixedarray_matmul_mask) / [`_matmul_mask`](#fixedarray_combine_masks-与-fixedarray_matmul_mask)                                                                                                                                                                                     | 逐元素按位或合并掩码 / 矩阵内积掩码传播                                  |
-|                        | [`FixedArray._is_numeric_operand`](#fixedarray_is_numeric_operand)                                                                                                                                                                                                                                                                             | 校验对象是否属于合法的数值操作数白名单                                   |
-|                        | [`FixedArray._coerce`](#fixedarray_coerce)                                                                                                                                                                                                                                                                                                     | 将运算另一侧的操作数安全转换为 `FixedArray`                              |
-|                        | [`FixedArray._lose_precision`](#fixedarray_lose_precision)                                                                                                                                                                                                                                                                                     | 判断缩减到 `target_scale` 是否会丢弃非零有效小数位                       |
-|                        | [`FixedArray._check_scale`](#fixedarray_check_scale)                                                                                                                                                                                                                                                                                           | 校验 `scale` 是否为非负整数                                              |
-|                        | [`FixedArray._as_int64`](#fixedarray_as_int64)                                                                                                                                                                                                                                                                                                 | 将整数标量或整数数组转换为 `int64` 数组并检查越界                        |
-|                        | [`FixedArray._align_scales`](#fixedarray_align_scales)                                                                                                                                                                                                                                                                                         | 将两个 `FixedArray` 的 `scale` 对齐到较大值                              |
-| **内部输入解析**       | [`FixedArray._parse_decimal_str`](#fixedarray_parse_decimal_str)                                                                                                                                                                                                                                                                               | 解析十进制字符串为 `(mantissa, scale)`                                   |
-|                        | [`FixedArray._parse_fraction`](#fixedarray_parse_fraction)                                                                                                                                                                                                                                                                                     | 解析有限十进制 `Fraction` 为 `(mantissa, scale)`                         |
-|                        | [`FixedArray._parse_float_scalar`](#fixedarray_parse_float_scalar)                                                                                                                                                                                                                                                                             | 按最短十进制写法（Dragonbox）解析单个浮点数                              |
-|                        | [`FixedArray._is_missing`](#fixedarray_is_missing-与-fixedarray_contains_bool) / [`_contains_bool`](#fixedarray_is_missing-与-fixedarray_contains_bool)                                                                                                                                                                                        | 判定单个元素是否为缺失值 / 检查嵌套序列中是否混有 `bool`                 |
-|                        | [`FixedArray._expand_nested`](#fixedarray_expand_nested)                                                                                                                                                                                                                                                                                       | 将嵌套序列中的 `FixedArray` 替换为等值 `Decimal`（保留小数位数）         |
-|                        | [`FixedArray._parse_object_element`](#fixedarray_parse_object_element)                                                                                                                                                                                                                                                                         | 解析单个标量对象为 `(mantissa, scale)`                                   |
-|                        | [`FixedArray._parse_float_array`](#fixedarray_parse_float_array)                                                                                                                                                                                                                                                                               | 向量化往返试探解析浮点数组为 `(尾数数组, scale)`                         |
-|                        | [`FixedArray._align_mantissas`](#fixedarray_align_mantissas)                                                                                                                                                                                                                                                                                   | 将不同 `scale` 的尾数向量化对齐到目标 `target`                           |
-|                        | [`FixedArray._round_float_to_scale`](#fixedarray_round_float_to_scale)                                                                                                                                                                                                                                                                         | 将浮点数组的最短十进制写法按 `half_up` 快速舍入到指定 `scale`            |
-|                        | [`FixedArray._parse_text_array`](#fixedarray_parse_text_array)                                                                                                                                                                                                                                                                                 | 去重解析字符串、`Decimal`、`Fraction` 或混合对象数组并返回掩码           |
-| **底层数学与舍入内核** | [`FixedArray._check_division`](#fixedarray_check_division)                                                                                                                                                                                                                                                                                     | 校验非缺失位置的除数非零及 `-2**63 / -1` 溢出边界                        |
-|                        | [`FixedArray._max_abs`](#fixedarray_max_abs)                                                                                                                                                                                                                                                                                                   | 安全计算 `int64` 数组绝对值的最大值（`-2**63` 不溢出）                   |
-|                        | [`FixedArray._mul_pow10`](#fixedarray_mul_pow10) / [`_mul_pow10_float`](#fixedarray_mul_pow10)                                                                                                                                                                                                                                                 | 带前置越界检查的 `x · 10^k` 整数放大与防溢出两步浮点放大                 |
-|                        | [`FixedArray._divmod_round`](#fixedarray_divmod_round)                                                                                                                                                                                                                                                                                         | 纯 `int64` 整数带余除法与精确舍入                                        |
-|                        | [`FixedArray._doubling_step_10r`](#fixedarray_doubling_step_10r)                                                                                                                                                                                                                                                                               | 大除数无溢出二进制倍增单步长除（计算 `(10r) // d` 与 `(10r) % d`）       |
-|                        | [`FixedArray._chunked_divmod_round`](#fixedarray_chunked_divmod_round)                                                                                                                                                                                                                                                                         | 分段十进制长除法与舍入 `round(m · 10^k / d)`                             |
-|                        | [`FixedArray._round_div_pow10`](#fixedarray_round_div_pow10)                                                                                                                                                                                                                                                                                   | 将带余商 `(q + r/d)` 除以 `10^k` 并精确舍入（支持任意 `k ≥ 0`）          |
-|                        | [`FixedArray._limbs_to_mantissa`](#fixedarray_limbs_to_mantissa)                                                                                                                                                                                                                                                                               | 将 [`_limbs`](_limbs.md) 多精度分块结果按目标 `shift` 舍入收口为 `int64` |
-|                        | [`moneta._rounding`](_rounding.md) / [`moneta._limbs`](_limbs.md)                                                                                                                                                                                                                                                                              | 独立拆分的统一舍入裁决引擎与 Base $2^{21}$ 多精度分块整数算术模块        |
-| **内部比较与格式化**   | [`FixedArray._compare_fixed_array`](#fixedarray_compare_fixed_arrayfixedarray_compare-与-fixedarray_eq_unrepresentable) / [`_compare`](#fixedarray_compare_fixed_arrayfixedarray_compare-与-fixedarray_eq_unrepresentable) / [`_eq_unrepresentable`](#fixedarray_compare_fixed_arrayfixedarray_compare-与-fixedarray_eq_unrepresentable)       | 无溢出整除跨 scale 比较网关与不可表示值逐元素判等                        |
-|                        | [`FixedArray._array_function`](#fixedarray_array_function-与-fixedarray_numpy_equal) / [`_numpy_equal`](#fixedarray_array_function-与-fixedarray_numpy_equal)                                                                                                                                                                                  | `__array_function__` 白名单分派与 `np.array_equal` / `array_equiv` 实现  |
-|                        | [`FixedArray._format_scalar`](#fixedarray_format_scalar)                                                                                                                                                                                                                                                                                       | 将单个整数尾数格式化为固定小数位字符串                                   |
+| 分类                   | 接口 / 运算符                                                                                                                                                                                                                                                                                                                                  | 功能说明                                                                          |
+|------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------|
+| **舍入模式与警告**     | [`RoundingMode`](#roundingmode)                                                                                                                                                                                                                                                                                                                | 六种金融与会计舍入模式枚举                                                        |
+|                        | [`PrecisionLossWarning`](#precisionlosswarning)                                                                                                                                                                                                                                                                                                | 精确输入超出目标 `scale` 并被舍入时发出的警告                                     |
+| **构造与属性**         | [`FixedArray(values, scale=None, mask=None, on_excess="raise")`](#fixedarrayvalues-scalenone-masknone-on_excessraise)                                                                                                                                                                                                                          | 从数值、字符串、`Decimal`、`Fraction`、数组构造                                   |
+|                        | [`FixedArray.mantissa`](#fixedarraymantissa)                                                                                                                                                                                                                                                                                                   | 只读 `int64` 尾数数组视图                                                         |
+|                        | [`FixedArray.scale`](#fixedarrayscale)                                                                                                                                                                                                                                                                                                         | 全局十进制小数位数                                                                |
+|                        | [`FixedArray.shape`](#fixedarrayshape) / [`ndim`](#fixedarrayndim) / [`size`](#fixedarraysize) / [`dtype`](#fixedarraydtype)                                                                                                                                                                                                                   | 形状、维数、元素总数、尾数数据类型                                                |
+|                        | [`FixedArray.T`](#fixedarrayt)                                                                                                                                                                                                                                                                                                                 | 反转全部轴的转置视图                                                              |
+| **缺失值（NA）处理**   | [`FixedArray.mask`](#fixedarraymask)                                                                                                                                                                                                                                                                                                           | 只读缺失值布尔掩码视图（无缺失值时为 `None`）                                     |
+|                        | [`FixedArray.isna`](#fixedarrayisnafixedarrayisnullfixedarraynotna-与-fixedarraynotnull) / [`isnull`](#fixedarrayisnafixedarrayisnullfixedarraynotna-与-fixedarraynotnull) / [`notna`](#fixedarrayisnafixedarrayisnullfixedarraynotna-与-fixedarraynotnull) / [`notnull`](#fixedarrayisnafixedarrayisnullfixedarraynotna-与-fixedarraynotnull) | 返回标记缺失位置或有效数值位置的布尔矩阵                                          |
+|                        | [`FixedArray.fillna`](#fixedarrayfillna)                                                                                                                                                                                                                                                                                                       | 用指定数值填充缺失位置                                                            |
+|                        | [`FixedArray.dropna`](#fixedarraydropna)                                                                                                                                                                                                                                                                                                       | 丢弃 1 维向量中的缺失值                                                           |
+| **算术运算**           | [`+a`、`-a`](#a-与--a一元正负号)                                                                                                                                                                                                                                                                                                               | 一元正负号                                                                        |
+|                        | [`abs(a)`](#absa绝对值)                                                                                                                                                                                                                                                                                                                        | 逐元素绝对值                                                                      |
+|                        | [`a + b`、`a - b`](#a--b-与-a---b加减法)                                                                                                                                                                                                                                                                                                       | 逐元素加减法，自动对齐 scale                                                      |
+|                        | [`a * b`](#a--b精确乘法)                                                                                                                                                                                                                                                                                                                       | 逐元素精确乘法（scale 相加）                                                      |
+|                        | [`FixedArray.mul_round`](#fixedarraymul_round)                                                                                                                                                                                                                                                                                                 | 融合乘法 + 一次舍入                                                               |
+|                        | [`a / b`](#a--b真除法)                                                                                                                                                                                                                                                                                                                         | 逐元素真除法（默认保留 `max(scale)` 位并 `half_up`）                              |
+|                        | [`FixedArray.divide`](#fixedarraydivide)                                                                                                                                                                                                                                                                                                       | 指定目标 scale 与舍入模式的精确除法                                               |
+|                        | [`a // b`、`a % b`、`divmod(a, b)`](#a--ba--b-与-divmoda-b整除与取余)                                                                                                                                                                                                                                                                          | 向下整除（返回 `scale=0` 的 `FixedArray`）、取余与带余除法                        |
+| **矩阵运算**           | [`a @ b`](#a--b精确矩阵乘法)                                                                                                                                                                                                                                                                                                                   | 精确矩阵乘法（scale 相加）                                                        |
+|                        | [`FixedArray.matmul`](#fixedarraymatmul)                                                                                                                                                                                                                                                                                                       | 矩阵乘法 + 一次舍入                                                               |
+| **规约统计**           | [`FixedArray.sum`](#fixedarraysum)                                                                                                                                                                                                                                                                                                             | 沿轴精确求和（支持 `skipna=True`）                                                |
+|                        | [`FixedArray.mean`](#fixedarraymean)                                                                                                                                                                                                                                                                                                           | 沿轴求算术均值并精确舍入（支持 `skipna=True`）                                    |
+| **精度与网格**         | [`FixedArray.rescale`](#fixedarrayrescale)                                                                                                                                                                                                                                                                                                     | 调整小数位数                                                                      |
+|                        | [`FixedArray.round_to_step`](#fixedarrayround_to_step)                                                                                                                                                                                                                                                                                         | 对齐到步长网格（最小变动价位、整手）                                              |
+|                        | [`FixedArray.is_on_step`](#fixedarrayis_on_step)                                                                                                                                                                                                                                                                                               | 逐元素判断是否落在步长网格上                                                      |
+| **比较运算**           | [`a == b`、`a != b`](#a--b-与-a--b相等性比较)                                                                                                                                                                                                                                                                                                  | 无溢出跨 scale 逐元素判断相等或不等                                               |
+|                        | [`a < b`、`a <= b`、`a > b`、`a >= b`](#a--ba--ba--ba--b大小比较)                                                                                                                                                                                                                                                                              | 无溢出跨 scale 逐元素比较大小                                                     |
+| **形状与协议**         | [`FixedArray.reshape`](#fixedarrayreshape)                                                                                                                                                                                                                                                                                                     | 不复制数据改变数组形状                                                            |
+|                        | [`FixedArray.transpose`](#fixedarraytranspose)                                                                                                                                                                                                                                                                                                 | 按指定顺序置换各轴                                                                |
+|                        | [`FixedArray.swapaxes`](#fixedarrayswapaxes-与-fixedarraysqueeze) / [`FixedArray.squeeze`](#fixedarrayswapaxes-与-fixedarraysqueeze)                                                                                                                                                                                                           | 交换两个轴 / 移除长度为 1 的轴                                                    |
+|                        | [`a[key]`](#akey索引与切片)                                                                                                                                                                                                                                                                                                                    | 索引、切片、布尔掩码与花式索引                                                    |
+|                        | [`len(a)`、`bool(a)`、`iter(a)`](#lenaboola-与-itera容器与真值协议)                                                                                                                                                                                                                                                                            | 首维长度、单元素真值测试与按首维迭代                                              |
+| **导出与互操作**       | [`FixedArray.to_float`](#fixedarrayto_float)                                                                                                                                                                                                                                                                                                   | 导出为 `float` / `float64` 数组（缺失值转 `nan`）                                 |
+|                        | [`FixedArray.to_decimal`](#fixedarrayto_decimal)                                                                                                                                                                                                                                                                                               | 导出为 `Decimal` / `object` 数组（缺失值转 `None`）                               |
+|                        | [`FixedArray.to_pandas`](#fixedarrayto_pandas)                                                                                                                                                                                                                                                                                                 | 导出为 `pandas.Series` / `DataFrame`                                              |
+|                        | [`FixedArray.to_polars`](#fixedarrayto_polars)                                                                                                                                                                                                                                                                                                 | 导出为 `polars.Series`                                                            |
+|                        | [`str(a)`、`repr(a)`](#stra-与-repra文本表示)                                                                                                                                                                                                                                                                                                  | 按 scale 补零的精确文本表示（缺失值显示 `<NA>`）                                  |
+|                        | [NumPy 互操作机制](#numpy-互操作机制)                                                                                                                                                                                                                                                                                                          | 可用与被禁止的 NumPy 函数（含 `np.array_equal`）、常见写法配方                    |
+| **内部构造与转换**     | [`FixedArray._set`](#fixedarray_set)                                                                                                                                                                                                                                                                                                           | 构造收口：绑定只读 `int64` 尾数视图、`scale` 与只读 `mask`                        |
+|                        | [`FixedArray._from_mantissa`](#fixedarray_from_mantissa)                                                                                                                                                                                                                                                                                       | 由已有 `int64` 尾数、`scale` 与可选 `mask` 零拷贝构造                             |
+|                        | [`FixedArray._combine_masks`](#fixedarray_combine_masks-与-fixedarray_matmul_mask) / [`_matmul_mask`](#fixedarray_combine_masks-与-fixedarray_matmul_mask)                                                                                                                                                                                     | 逐元素按位或合并掩码 / 矩阵内积掩码传播                                           |
+|                        | [`FixedArray._is_numeric_operand`](#fixedarray_is_numeric_operand)                                                                                                                                                                                                                                                                             | 校验对象是否属于合法的数值操作数白名单                                            |
+|                        | [`FixedArray._coerce`](#fixedarray_coerce)                                                                                                                                                                                                                                                                                                     | 将运算另一侧的操作数安全转换为 `FixedArray`                                       |
+|                        | [`FixedArray._quantize_precision`](#fixedarray_quantize_precision)                                                                                                                                                                                                                                                                             | 将精确输入尾数对齐到目标 `scale` 并按 `on_excess` 报错或告警舍入                  |
+|                        | [`_user_stacklevel`、`_ON_EXCESS`、`_MAX`、`_MIN`](#_user_stacklevel-与-_on_excess)                                                                                                                                                                                                                                                            | 告警栈帧跳转定位函数、合法 `on_excess` 选项与 `int64` 极值常量                    |
+|                        | [`FixedArray._check_scale`](#fixedarray_check_scale)                                                                                                                                                                                                                                                                                           | 校验 `scale` 是否为非负整数                                                       |
+|                        | [`FixedArray._as_int64`](#fixedarray_as_int64)                                                                                                                                                                                                                                                                                                 | 将整数标量或整数数组转换为 `int64` 数组并检查越界                                 |
+|                        | [`FixedArray._align_scales`](#fixedarray_align_scales)                                                                                                                                                                                                                                                                                         | 将两个 `FixedArray` 的 `scale` 对齐到较大值                                       |
+| **内部输入解析**       | [`FixedArray._parse_decimal_str`](#fixedarray_parse_decimal_str)                                                                                                                                                                                                                                                                               | 解析十进制字符串为 `(mantissa, scale)`                                            |
+|                        | [`FixedArray._parse_fraction`](#fixedarray_parse_fraction)                                                                                                                                                                                                                                                                                     | 解析有限十进制 `Fraction` 为 `(mantissa, scale)`                                  |
+|                        | [`FixedArray._parse_float_scalar`](#fixedarray_parse_float_scalar)                                                                                                                                                                                                                                                                             | 按最短十进制写法（Dragonbox）解析单个浮点数                                       |
+|                        | [`FixedArray._is_missing`](#fixedarray_is_missing-与-fixedarray_contains_bool) / [`_contains_bool`](#fixedarray_is_missing-与-fixedarray_contains_bool)                                                                                                                                                                                        | 判定单个元素是否为缺失值 / 检查嵌套序列中是否混有 `bool`                          |
+|                        | [`FixedArray._expand_nested`](#fixedarray_expand_nested)                                                                                                                                                                                                                                                                                       | 将嵌套序列中的 `FixedArray` 替换为等值 `Decimal`（保留小数位数）                  |
+|                        | [`FixedArray._parse_object_element`](#fixedarray_parse_object_element)                                                                                                                                                                                                                                                                         | 解析单个标量对象为 `(mantissa, scale)`                                            |
+|                        | [`FixedArray._parse_float_array`](#fixedarray_parse_float_array)                                                                                                                                                                                                                                                                               | 向量化往返试探解析浮点数组为 `(尾数数组, scale)`                                  |
+|                        | [`FixedArray._align_mantissas`](#fixedarray_align_mantissas)                                                                                                                                                                                                                                                                                   | 将不同 `scale` 的尾数向量化对齐到目标 `target`                                    |
+|                        | [`FixedArray._round_float_to_scale`](#fixedarray_round_float_to_scale)                                                                                                                                                                                                                                                                         | 将浮点数组的最短十进制写法按 `half_up` 快速舍入到指定 `scale`                     |
+|                        | [`FixedArray._parse_text_array`](#fixedarray_parse_text_array)                                                                                                                                                                                                                                                                                 | 去重解析字符串、`Decimal`、`Fraction` 或混合对象数组并返回掩码                    |
+| **底层数学与舍入内核** | [`FixedArray._check_division`](#fixedarray_check_division)                                                                                                                                                                                                                                                                                     | 校验非缺失位置的除数非零及 `-2**63 / -1` 溢出边界                                 |
+|                        | [`FixedArray._max_abs`](#fixedarray_max_abs)                                                                                                                                                                                                                                                                                                   | 安全计算 `int64` 数组绝对值的最大值（`-2**63` 不溢出）                            |
+|                        | [`FixedArray._mul_pow10`](#fixedarray_mul_pow10) / [`_mul_pow10_float`](#fixedarray_mul_pow10)                                                                                                                                                                                                                                                 | 带前置越界检查的 `x · 10^k` 整数放大与防溢出两步浮点放大                          |
+|                        | [`FixedArray._divmod_round`](#fixedarray_divmod_round)                                                                                                                                                                                                                                                                                         | 纯 `int64` 整数带余除法与精确舍入                                                 |
+|                        | [`FixedArray._doubling_step_10r`](#fixedarray_doubling_step_10r)                                                                                                                                                                                                                                                                               | 大除数无溢出二进制倍增单步长除（计算 `(10r) // d` 与 `(10r) % d`）                |
+|                        | [`FixedArray._chunked_divmod_round`](#fixedarray_chunked_divmod_round)                                                                                                                                                                                                                                                                         | 分段十进制长除法与舍入 `round(m · 10^k / d)`                                      |
+|                        | [`FixedArray._round_div_pow10`](#fixedarray_round_div_pow10)                                                                                                                                                                                                                                                                                   | 将带余商 `(q + r/d)` 除以 `10^k` 并精确舍入（支持任意 `k ≥ 0`）                   |
+|                        | [`FixedArray._limbs_to_mantissa`](#fixedarray_limbs_to_mantissa)                                                                                                                                                                                                                                                                               | 将 [`_limbs`](_limbs.md) 多精度分块结果按目标 `shift` 舍入收口为 `int64`          |
+|                        | [`moneta._rounding`](_rounding.md) / [`moneta._limbs`](_limbs.md)                                                                                                                                                                                                                                                                              | 独立拆分的统一舍入裁决引擎与 Base $2^{21}$ 多精度分块整数算术模块                 |
+| **内部比较与格式化**   | [`FixedArray._compare_fixed_array`](#fixedarray_compare_fixed_arrayfixedarray_compare-与-fixedarray_eq_unrepresentable) / [`_compare`](#fixedarray_compare_fixed_arrayfixedarray_compare-与-fixedarray_eq_unrepresentable) / [`_eq_unrepresentable`](#fixedarray_compare_fixed_arrayfixedarray_compare-与-fixedarray_eq_unrepresentable)       | 无溢出整除跨 scale 比较网关与不可表示值逐元素判等                                 |
+|                        | [`FixedArray._array_function`](#fixedarray_array_function-与-fixedarray_numpy_equal) / [`_numpy_equal`](#fixedarray_array_function-与-fixedarray_numpy_equal) / [`_NUMPY_DISPATCHED`](#fixedarray_array_function-与-fixedarray_numpy_equal)                                                                                                    | `__array_function__` 白名单分派、`_NUMPY_DISPATCHED` 集合与 `np.array_equal` 实现 |
+|                        | [`FixedArray._format_scalar`](#fixedarray_format_scalar)                                                                                                                                                                                                                                                                                       | 将单个整数尾数格式化为固定小数位字符串                                            |
 
-## 舍入模式
+## 舍入模式与精度警告
 
 ### RoundingMode
 
@@ -226,12 +229,61 @@ ValueError: rounding 只能是 ('half_up', 'half_even', 'down', 'up', 'floor', '
 
 - [`FixedArray.rescale`](#fixedarrayrescale) – 最直接的舍入入口。
 
-## 构造与核心属性
-
-### `FixedArray(values, scale=None, mask=None)`
+### PrecisionLossWarning
 
 ```python
-class moneta.FixedArray(values, scale=None, mask=None)
+class moneta.PrecisionLossWarning(UserWarning)
+```
+
+精确输入（`str`、`Decimal`、`Fraction`、`FixedArray` 及包含这些元素的序列/`object` 数组）在超出目标 `scale` 的小数位上含有非零数字、且
+`on_excess="warn"` 时发出的警告。定义于 `moneta.fixed_array` 并由顶层 `moneta` 重导出。
+
+**机制说明**
+
+- 继承自内置 `UserWarning`。
+- **触发条件**：当调用 `FixedArray(values, scale=..., on_excess="warn")`（以及内部统一委托该调用的 [
+  `Money(values, currency)`](money.md#moneyvalues-currency)、[
+  `Price(values, ..., scale=...)`](price.md#pricevalues-quote_currency-base_unitshare-tick_sizenone-scalenone)、[
+  `Quantity(values, ..., scale=...)`](quantity.md#quantityvalues-unitshare-scalenone) 与 `Money.fillna`）时，若非缺失位置在目标
+  `scale` 之后存在非零十进制位，先发出 `PrecisionLossWarning("输入的小数位数 ({s}) 超出指定 scale ({scale})，已按 half_up 舍入")`
+  ，随后按 `half_up` 舍入。
+- **不触发警告的情形**：
+  1. 输入为 `float` 或浮点数组（近似值直接按最短写法 `half_up` 静默舍入，不受 `on_excess` 影响）；
+  2. 超出 `scale` 的位上只有末尾的 `0`（如 `FixedArray("1.500", scale=2, on_excess="warn")`）；
+  3. 超出位仅出现在缺失位置 `<NA>` 上。
+- **告警位置自动指向用户代码**：内部通过 [`_user_stacklevel()`](#_user_stacklevel-与-_on_excess) 动态计算 `stacklevel`
+  ，自动跳过 `moneta` 包内部的调用帧，使告警无论从 `FixedArray`、`Money`、`Price`、`Quantity` 还是 `fillna`
+  触发，都直接指向用户自己的调用行。可通过 `warnings.simplefilter("error", PrecisionLossWarning)` 将其升级为异常。
+
+**示例**
+
+```python
+>>> import warnings
+>>> from moneta import FixedArray, PrecisionLossWarning
+>>> with warnings.catch_warnings(record=True) as w:
+...     warnings.simplefilter("always")
+...     a = FixedArray("1.235", scale=2, on_excess="warn")
+...     (a, len(w), issubclass(w[0].category, PrecisionLossWarning))
+(FixedArray(1.24, scale=2), 1, True)
+>>> with warnings.catch_warnings():
+...     warnings.simplefilter("error", PrecisionLossWarning)
+...     FixedArray("1.235", scale=2, on_excess="warn")
+Traceback (most recent call last):
+    ...
+moneta.fixed_array.PrecisionLossWarning: 输入的小数位数 (3) 超出指定 scale (2)，已按 half_up 舍入
+```
+
+**另请参阅**
+
+- [`FixedArray(values, scale=None, mask=None, on_excess="raise")`](#fixedarrayvalues-scalenone-masknone-on_excessraise)
+- [`FixedArray._quantize_precision`](#fixedarray_quantize_precision)
+
+## 构造与核心属性
+
+### `FixedArray(values, scale=None, mask=None, on_excess="raise")`
+
+```python
+class moneta.FixedArray(values, scale=None, mask=None, on_excess="raise")
 ```
 
 从数值、字符串、`Decimal`、`Fraction`、序列或 NumPy 数组构造定点数数组。
@@ -244,6 +296,13 @@ class moneta.FixedArray(values, scale=None, mask=None)
   默认 `None` 时按下表自动推断。
 - **mask** : *bool 或 bool array_like，可选* — 缺失值布尔掩码（`True` 表示对应位置为缺失值 `<NA>`），可广播到 `values` 的形状；与
   `values` 中自带的缺失值（`None`、`NaN`、`Decimal("NaN")`、文本 `"nan"`、`pandas.NA`）取并集。
+- **on_excess** : *{"raise", "warn"}，默认 `"raise"`* — 仅在显式指定 `scale` 时对 **精确输入**（`str`、`Decimal`、
+  `Fraction`、`FixedArray` 及含这些元素的序列）生效：
+  - `"raise"`（默认）：当非缺失元素在超出 `scale` 的小数位上含有非零数字时抛出 `ValueError`；
+  - `"warn"`：发出 [`PrecisionLossWarning`](#precisionlosswarning) 后按 `half_up` 舍入到 `scale`（上层 `Money`、`Price`、
+    `Quantity` 构造时内部即传入 `on_excess="warn"`）；
+  - 当多出的小数位全是末尾 `0`（如 `"1.500"` 指定 `scale=2`）或属于缺失位置 `<NA>` 时，直接对齐到 `scale`，既不报错也不告警；
+  - `float` 及浮点数组一律按最短写法 `half_up` 静默舍入，不受 `on_excess` 影响。
 
 **返回值**
 
@@ -252,21 +311,27 @@ class moneta.FixedArray(values, scale=None, mask=None)
 **异常**
 
 - **TypeError** — `values` 的类型不受支持（`bool`、复数、`datetime64` 等）。
-- **ValueError** — `scale` 不是非负整数；输入含 NaN 或无穷大；字符串无法解析；`Fraction` 不是有限小数（如 `1/3`）；
-  字符串 / `Decimal` / `Fraction` 的小数位数超过显式 `scale`。
+- **ValueError** — `on_excess` 不是 `"raise"` 或 `"warn"`；`scale` 不是非负整数；输入含无穷大 `inf`；字符串无法解析；
+  `Fraction` 不是有限小数（如 `1/3`）；
+  `on_excess="raise"` 时精确输入在超出显式 `scale` 的小数位上含有非零数字。
 - **OverflowError** — 数值（或对齐到共同 scale 后的尾数）超出 `int64` 范围。
+
+**警告**
+
+- **[`PrecisionLossWarning`](#precisionlosswarning)** — `on_excess="warn"` 且显式指定 `scale` 时，精确输入在超出 `scale`
+  的小数位上含有非零数字时触发。
 
 **机制说明**
 
-| 输入                      | `scale=None` 时                                | 显式 `scale` 时                                |
-|---------------------------|------------------------------------------------|------------------------------------------------|
-| `int` / 整数数组          | `0`                                            | 数值不变，尾数乘以 `10**scale`                 |
-| `float` 标量              | 最短十进制写法的小数位数（`0.1` → 1）          | 比推断值小时按 `half_up` 舍入                  |
-| `float` 数组              | 每个元素取最短往返写法，再取最大小数位数       | 每个元素直接舍入到 `scale`，不必先对齐到全精度 |
-| `str` / `Decimal`         | 字面声明的小数位数（`"1.50"` → 2，保留尾随零） | 只能扩大；比字面位数小时报 `ValueError`        |
-| `Fraction`                | 能精确表示它的最少小数位数（`3/8` → 3）        | 只能扩大                                       |
-| 混合 `object` 数组 / 序列 | 各元素按上述规则解析后取最大值                 | 只能扩大                                       |
-| `FixedArray`              | 原 scale，共享尾数（不复制）                   | 等价于 `values.rescale(scale)`，`half_up`      |
+| 输入                      | `scale=None` 时                                | 显式 `scale` 时                                                                                    |
+|---------------------------|------------------------------------------------|----------------------------------------------------------------------------------------------------|
+| `int` / 整数数组          | `0`                                            | 数值不变，尾数乘以 `10**scale`                                                                     |
+| `float` 标量              | 最短十进制写法的小数位数（`0.1` → 1）          | 比推断值小时按 `half_up` 静默舍入（不受 `on_excess` 影响）                                         |
+| `float` 数组              | 每个元素取最短往返写法，再取最大小数位数       | 每个元素直接按 `half_up` 静默舍入到 `scale`，不必先对齐到全精度                                    |
+| `str` / `Decimal`         | 字面声明的小数位数（`"1.50"` → 2，保留尾随零） | 不足补 `0`；多出的位全是末尾 `0` 直接对齐；有非零数字时按 `on_excess` 报 `ValueError` 或告警后舍入 |
+| `Fraction`                | 能精确表示它的最少小数位数（`3/8` → 3）        | 不足补 `0`；超出 `scale` 时按 `on_excess` 报 `ValueError` 或告警后 `half_up` 舍入                  |
+| 混合 `object` 数组 / 序列 | 各元素按上述规则解析后取最大值                 | 不足补 `0`；多出的位有非零数字时按 `on_excess` 报 `ValueError` 或告警后 `half_up` 舍入             |
+| `FixedArray`              | 原 scale，共享尾数（不复制）                   | 不足补 `0`；多出的位全是末尾 `0` 直接对齐；有非零数字时按 `on_excess` 报 `ValueError` 或告警后舍入 |
 
 - **浮点数按最短写法解析。** 浮点数不按其二进制精确值解析（`0.1` 的精确值有 55 位小数），而是按
   “最短的、能往返还原为同一个浮点数的十进制写法”（与 `repr(float)` 一致，即 Dragonbox 算法的结果）解析。
@@ -280,8 +345,11 @@ class moneta.FixedArray(values, scale=None, mask=None)
   `FixedArray(2.675, scale=2)` 得到 `2.68`，而内置 `round(2.675, 2)` 得到 `2.67`。
 - **全零数组与极值边界。** 全零输入（如 `0`、`[0, 0]`、`"0"`）指定任意大的 `scale`（即使 `scale > 18`）都不会溢出；
   字符串与 `Decimal` 支持精确解析到 `int64` 下限 `-2**63`（`-9223372036854775808`）。
-- **字符串不会被隐式舍入。** 字符串、`Decimal`、`Fraction` 被视为精确输入，小数位数超过 `scale` 时报错，
-  避免悄悄丢掉精度；需要舍入时先构造再 [`rescale`](#fixedarrayrescale)。
+- **精确输入由 `_quantize_precision` 与 `on_excess` 统一把关。** 字符串、`Decimal`、`Fraction`、`FixedArray`
+  （及包含它们的序列）统称为精确输入：当显式指定 `scale` 时，若多出的小数位只是末尾的 `0`（如 `FixedArray("1.500", scale=2)`
+  或 `FixedArray(FixedArray("1.50"), scale=1)`）或是缺失位置 `<NA>`，直接无损对齐；只有当非缺失位置在多出的小数位上确实存在非零数字时，才按
+  `on_excess` 报错（默认 `"raise"`）或发出 [`PrecisionLossWarning`](#precisionlosswarning) 后按 `half_up` 舍入（`"warn"`
+  ）。需要不带告警地按指定模式舍入时，请先构造再调用 [`rescale`](#fixedarrayrescale)。
 - **不可变。** 从整数 `ndarray` 构造时，如果结果会与调用方的数组共享内存，会先复制一份。
 
 **示例**
@@ -335,9 +403,10 @@ FixedArray([123456789012.50, 0.12], scale=2)
 FixedArray([100000.00, 0.33], scale=2)
 ```
 
-`Fraction`、混合类型与另一个 `FixedArray`：
+`Fraction`、混合类型、另一个 `FixedArray` 与 `on_excess` 控制：
 
 ```python
+>>> import warnings
 >>> from fractions import Fraction
 >>> FixedArray(Fraction(3, 8))
 FixedArray(0.375, scale=3)
@@ -348,19 +417,23 @@ FixedArray([1.50, 2.00], scale=2)
 >>> FixedArray([FixedArray([1, 2]), FixedArray(["3.5", "4"])])  # 相同形状的 FixedArray 沿首维堆叠
 FixedArray([[1.0, 2.0],
             [3.5, 4.0]], scale=1)
->>> FixedArray(FixedArray("1.25"), scale=1)  # 等价于 rescale(1)
-FixedArray(1.3, scale=1)
+>>> FixedArray("1.500", scale=2), FixedArray(FixedArray("1.50"), scale=1)  # 多出的只是末尾 0，直接对齐
+(FixedArray(1.50, scale=2), FixedArray(1.5, scale=1))
+>>> with warnings.catch_warnings(record=True) as w:
+...     warnings.simplefilter("always")
+...     (FixedArray("1.25", scale=1, on_excess="warn"), len(w))
+(FixedArray(1.3, scale=1), 1)
 ```
 
 缺失值（`None`、`NaN`、`Decimal("NaN")`、`"nan"`）与显式 `mask`：
 
 ```python
->> > FixedArray(None), FixedArray(float("nan"))
-(FixedArray( < NA >, scale=0), FixedArray( < NA >, scale = 0))
->> > FixedArray(["1.50", None, "nan", "2.25"])
-FixedArray([1.50, < NA >, < NA >, 2.25], scale = 2)
->> > FixedArray([10, 20, 30], scale=1, mask=[False, True, False])
-FixedArray([10.0, < NA >, 30.0], scale = 1)
+>>> FixedArray(None), FixedArray(float("nan"))
+(FixedArray(<NA>, scale=0), FixedArray(<NA>, scale=0))
+>>> FixedArray(["1.50", None, "nan", "2.25"])
+FixedArray([1.50, <NA>, <NA>, 2.25], scale=2)
+>>> FixedArray([10, 20, 30], scale=1, mask=[False, True, False])
+FixedArray([10.0, <NA>, 30.0], scale=1)
 ```
 
 非法输入：
@@ -374,6 +447,14 @@ ValueError: 1/3 不是有限小数
 Traceback (most recent call last):
     ...
 ValueError: 输入的小数位数 (3) 超出指定 scale (2)
+>>> FixedArray(FixedArray("1.25"), scale=1)
+Traceback (most recent call last):
+    ...
+ValueError: 输入的小数位数 (2) 超出指定 scale (1)
+>>> FixedArray(1, on_excess="ignore")
+Traceback (most recent call last):
+    ...
+ValueError: on_excess 只能是 ('raise', 'warn') 之一，收到 'ignore'
 >>> FixedArray(float("inf"))
 Traceback (most recent call last):
     ...
@@ -658,10 +739,10 @@ FixedArray.mask
 **示例**
 
 ```python
->> > FixedArray(["1.5", "2.0"]).mask is None
+>>> FixedArray(["1.5", "2.0"]).mask is None
 True
->> > m = FixedArray(["1.5", None, "2.0"]).mask
->> > m, m.flags.writeable
+>>> m = FixedArray(["1.5", None, "2.0"]).mask
+>>> m, m.flags.writeable
 (array([False, True, False]), False)
 ```
 
@@ -688,10 +769,10 @@ FixedArray.notnull()
 **示例**
 
 ```python
->> > a = FixedArray(["1.50", None, "2.25"])
->> > a.isna().tolist(), a.notna().tolist()
+>>> a = FixedArray(["1.50", None, "2.25"])
+>>> a.isna().tolist(), a.notna().tolist()
 ([False, True, False], [True, False, True])
->> > bool((a.isnull() == a.isna()).all() and (a.notnull() == a.notna()).all())
+>>> bool((a.isnull() == a.isna()).all() and (a.notnull() == a.notna()).all())
 True
 ```
 
@@ -1771,7 +1852,7 @@ OverflowError: 乘以 10^2 后超出 int64 范围
 
 **另请参阅**
 
-- [`FixedArray(values, scale=…)`](#fixedarrayvalues-scalenone-masknone) – 构造时指定 scale。
+- [`FixedArray(values, scale=…)`](#fixedarrayvalues-scalenone-masknone-on_excessraise) – 构造时指定 scale。
 - [`FixedArray.round_to_step`](#fixedarrayround_to_step) – 舍入到任意步长，而不只是 10 的幂。
 - [`FixedArray._mul_pow10`](#fixedarray_mul_pow10)、[`_round_div_pow10`](#fixedarray_round_div_pow10) – 底层放大与缩小舍入实现。
 
@@ -2141,10 +2222,10 @@ FixedArray.squeeze(axis=None)
 **示例**
 
 ```python
->> > a = FixedArray(np.arange(6).reshape(1, 2, 3), scale=1)
->> > a.swapaxes(0, 2).shape
+>>> a = FixedArray(np.arange(6).reshape(1, 2, 3), scale=1)
+>>> a.swapaxes(0, 2).shape
 (3, 2, 1)
->> > a.squeeze().shape, a.squeeze(axis=0).shape
+>>> a.squeeze().shape, a.squeeze(axis=0).shape
 ((2, 3), (2, 3))
 ```
 
@@ -2360,7 +2441,7 @@ True
 
 **另请参阅**
 
-- [`FixedArray(values, scale=None, mask=None)`](#fixedarrayvalues-scalenone-masknone)
+- [`FixedArray(values, scale=None, mask=None, on_excess="raise")`](#fixedarrayvalues-scalenone-masknone-on_excessraise)
 
 ### FixedArray.to_pandas
 
@@ -2533,7 +2614,9 @@ TypeError: unsupported format string passed to FixedArray.__format__
 `__array_ufunc__ = None` 还让 `ndarray` 位于运算符 **左侧**时，NumPy 主动放弃处理，由 Python 调用 `FixedArray`
 的反向运算，所以 `np.array([1, 2]) * a` 的结果仍是 `FixedArray`。
 
-以下 NumPy 函数会转发到 `FixedArray` 自身的方法或属性，可以直接使用：
+以下列入模块常量 [`_NUMPY_DISPATCHED`](#fixedarray_array_function-与-fixedarray_numpy_equal)（
+`frozenset({np.sum, np.mean, np.transpose, np.shape, np.ndim, np.size})`）的 NumPy 函数（外加 `np.array_equal` 与
+`np.array_equiv`）会经由 `__array_function__` 转发到 `FixedArray` 自身的方法或属性，可以直接使用：
 
 | NumPy 调用                                  | 等价于                                      | 备注                         |
 |---------------------------------------------|---------------------------------------------|------------------------------|
@@ -2646,10 +2729,10 @@ FixedArray._set(mantissa, scale, mask=None)
 
 ```python
 >>> obj = FixedArray.__new__(FixedArray)
->> > obj._set(np.array([150, 999], dtype=np.int64), 2, mask=[False, True])
->> > obj, obj.mantissa.tolist(), obj.mask.tolist()
-(FixedArray([1.50, < NA >], scale=2), [150, 0], [False, True])
->> > obj.mantissa.flags.writeable, obj.mask.flags.writeable
+>>> obj._set(np.array([150, 999], dtype=np.int64), 2, mask=[False, True])
+>>> obj, obj.mantissa.tolist(), obj.mask.tolist()
+(FixedArray([1.50, <NA>], scale=2), [150, 0], [False, True])
+>>> obj.mantissa.flags.writeable, obj.mask.flags.writeable
 (False, False)
 ```
 
@@ -2681,8 +2764,8 @@ FixedArray._from_mantissa(mantissa, scale, mask=None)
 ```python
 >>> FixedArray._from_mantissa(np.array([1234, -500], dtype=np.int64), scale=2)
 FixedArray([12.34, -5.00], scale=2)
->> > FixedArray._from_mantissa(np.array([1234, 0], dtype=np.int64), scale=2, mask=[False, True])
-FixedArray([12.34, < NA >], scale = 2)
+>>> FixedArray._from_mantissa(np.array([1234, 0], dtype=np.int64), scale=2, mask=[False, True])
+FixedArray([12.34, <NA>], scale=2)
 ```
 
 **另请参阅**
@@ -2716,11 +2799,11 @@ FixedArray._matmul_mask(m1, m2, s1, s2)
 **示例**
 
 ```python
->> > FixedArray._combine_masks(None, None) is None
+>>> FixedArray._combine_masks(None, None) is None
 True
->> > FixedArray._combine_masks(np.array([True, False]), np.array([False, False])).tolist()
+>>> FixedArray._combine_masks(np.array([True, False]), np.array([False, False])).tolist()
 [True, False]
->> > FixedArray._matmul_mask(np.array([[True, False]]), None, (1, 2), (2, 1)).tolist()
+>>> FixedArray._matmul_mask(np.array([[True, False]]), None, (1, 2), (2, 1)).tolist()
 [[True]]
 ```
 
@@ -2753,7 +2836,7 @@ FixedArray._is_numeric_operand(val)
 **示例**
 
 ```python
->> > FixedArray._is_numeric_operand(10), FixedArray._is_numeric_operand([1.5, None, FixedArray("2.0")])
+>>> FixedArray._is_numeric_operand(10), FixedArray._is_numeric_operand([1.5, None, FixedArray("2.0")])
 (True, True)
 >>> FixedArray._is_numeric_operand(True), FixedArray._is_numeric_operand("1.5")
 (False, False)
@@ -2786,8 +2869,8 @@ FixedArray._coerce(other, strict=True)
 ```python
 >>> FixedArray._coerce(1.25)
 FixedArray(1.25, scale=2)
->> > FixedArray._coerce(None)
-FixedArray( < NA >, scale = 0)
+>>> FixedArray._coerce(None)
+FixedArray(<NA>, scale=0)
 >>> FixedArray._coerce("1.25", strict=False) is None
 True
 ```
@@ -2796,36 +2879,83 @@ True
 
 - [`FixedArray._is_numeric_operand`](#fixedarray_is_numeric_operand)
 
-### FixedArray._lose_precision
+### FixedArray._quantize_precision
 
 ```python
-FixedArray._lose_precision(target_scale)
+FixedArray._quantize_precision(m, s, scale, mask, on_excess)
 ```
 
-判断将当前 `FixedArray` 的小数位数缩减到 `target_scale` 是否会丢失非零有效小数位（末尾多余的 `0` 以及被 `mask`
-标记为缺失的位置不计为精度丢失）。
+将精确输入（`str`、`Decimal`、`Fraction`、`FixedArray` 等）的尾数数组 `m` 从当前小数位数 `s` 对齐到目标 `scale`：
+
+- 当 `s <= scale` 时，调用 [`FixedArray._mul_pow10(m, scale - s)`](#fixedarray_mul_pow10) 放大补零；
+- 当 `s > scale`（设 `k = s - scale`）时，检查非缺失位置是否存在非零余数
+  `lost = (m != 0) if k > 18 else (m % (10 ** k) != 0)`（若 `mask is not None` 则执行 `lost = lost & ~mask` 跳过缺失位置）：
+  - 若 `np.any(lost)` 为 `False`（多出的位全是末尾 `0` 或全是缺失值），直接调用 `_round_div_pow10(m, 0, 1, k, "half_up")`
+    无损缩小，不报错也不告警；
+  - 若 `np.any(lost)` 为 `True`：当 `on_excess == "raise"` 时抛出 `ValueError(f"输入的小数位数 ({s}) 超出指定 scale ({scale})")`
+    ；当 `on_excess == "warn"` 时通过 [`_user_stacklevel()`](#_user_stacklevel-与-_on_excess) 发出 [
+    `PrecisionLossWarning`](#precisionlosswarning) 后按 `half_up` 舍入。
 
 **参数**
 
-- **target_scale** : *int* — 目标小数位数。
+- **m** : *numpy.ndarray（int64）* — 精确输入解析出的整数尾数数组。
+- **s** : *int* — `m` 当前的小数位数。
+- **scale** : *int* — 目标小数位数。
+- **mask** : *numpy.ndarray（bool）或 None* — 缺失值布尔掩码（缺失位置不计入精度丢失）。
+- **on_excess** : *{"raise", "warn"}* — 超出目标精度时的处理方式。
 
 **返回值**
 
-- **out** : *bool* — 若存在有效（非缺失）元素在 `target_scale` 之后仍有非零十进制数字，返回 `True`；否则返回 `False`。
-
-**机制说明**
-
-设 `k = self._scale - target_scale`：若 `k <= 0` 直接返回 `False`；若 `k > 18`（由于 `|mantissa| < 10^19 <= 10^k`
-），只要存在非零有效尾数即返回 `True`；否则检查 `(self._mantissa % (10 ** k) != 0) & valid`。供上层 [`Money`](money.md)、[
-`Price`](price.md)、[`Quantity`](quantity.md) 判断是否需要发出 [
-`PrecisionLossWarning`](unit_array.md#precisionlosswarning)。
+- **out** : *numpy.ndarray（int64）* — 对齐到 `scale` 后的整数尾数数组。
 
 **示例**
 
 ```python
->> > FixedArray("1.500")._lose_precision(2)
-False
->> > FixedArray("1.505")._lose_precision(2)
+>>> import warnings
+>>> # 1.500 (m=1500, s=3) 对齐到 scale=2：多出的只是末尾 0，直接对齐不报错
+>>> int(FixedArray._quantize_precision(np.int64(1500), 3, 2, None, "raise"))
+150
+>>> # 1.505 (m=1505, s=3) 对齐到 scale=2：on_excess="raise" 报错
+>>> FixedArray._quantize_precision(np.int64(1505), 3, 2, None, "raise")
+Traceback (most recent call last):
+    ...
+ValueError: 输入的小数位数 (3) 超出指定 scale (2)
+>>> # on_excess="warn"：发出 PrecisionLossWarning 并按 half_up 舍入为 151
+>>> with warnings.catch_warnings(record=True) as w:
+...     warnings.simplefilter("always")
+...     (int(FixedArray._quantize_precision(np.int64(1505), 3, 2, None, "warn")), len(w))
+(151, 1)
+```
+
+**另请参阅**
+
+- [`PrecisionLossWarning`](#precisionlosswarning)
+- [`_user_stacklevel` 与 `_ON_EXCESS`](#_user_stacklevel-与-_on_excess)
+
+### `_user_stacklevel` 与 `_ON_EXCESS`
+
+```python
+moneta.fixed_array._ON_EXCESS = ('raise', 'warn')
+moneta.fixed_array._MAX = 9223372036854775807   # (1 << 63) - 1
+moneta.fixed_array._MIN = -9223372036854775808  # -(1 << 63)
+moneta.fixed_array._user_stacklevel()
+```
+
+- **`_ON_EXCESS`**：构造器 `on_excess` 参数允许的合法取值元组 `('raise', 'warn')`。
+- **`_MAX` / `_MIN`**：有符号 64 位整数（`int64`）的最大值 `2**63 - 1` 与最小值 `-2**63`，用于 [
+  `_as_int64`](#fixedarray_as_int64)、[`_mul_pow10`](#fixedarray_mul_pow10)、[
+  `_doubling_step_10r`](#fixedarray_doubling_step_10r) 及算术溢出边界判定。
+- **`_user_stacklevel()`**：从调用栈自底向上回溯（`sys._getframe`），跳过所有模块名以 `"moneta"` 开头的内部调用帧，返回指向用户业务代码的第一帧
+  `stacklevel`。确保无论是直接调用 `FixedArray(..., on_excess="warn")`、通过 `Money(...)` / `Price(...)` / `Quantity(...)`
+  构造，还是通过 `Money.fillna(...)` 填充缺失值，发出的 [`PrecisionLossWarning`](#precisionlosswarning) 都精准指向用户代码行。
+
+**示例**
+
+```python
+>>> from moneta.fixed_array import _MAX, _MIN, _ON_EXCESS, _user_stacklevel
+>>> _ON_EXCESS, _MAX == (1 << 63) - 1, _MIN == -(1 << 63)
+(('raise', 'warn'), True, True)
+>>> _user_stacklevel() >= 1
 True
 ```
 
@@ -2878,7 +3008,7 @@ FixedArray._align_scales(a, b)
 **示例**
 
 ```python
->> > FixedArray._align_scales(FixedArray("1.5"), FixedArray("2.25"))
+>>> FixedArray._align_scales(FixedArray("1.5"), FixedArray("2.25"))
 (FixedArray(1.50, scale=2), FixedArray(2.25, scale=2))
 ```
 
@@ -2895,9 +3025,9 @@ FixedArray._parse_decimal_str(s)
 **示例**
 
 ```python
->> > FixedArray._parse_decimal_str("-12.340")
+>>> FixedArray._parse_decimal_str("-12.340")
 (-12340, 3)
->> > FixedArray._parse_decimal_str("1.5e-2")
+>>> FixedArray._parse_decimal_str("1.5e-2")
 (15, 3)
 ```
 
@@ -2950,9 +3080,9 @@ FixedArray._contains_bool(values)
 **示例**
 
 ```python
->> > FixedArray._is_missing(None), FixedArray._is_missing(float("nan")), FixedArray._is_missing("NaN")
+>>> FixedArray._is_missing(None), FixedArray._is_missing(float("nan")), FixedArray._is_missing("NaN")
 (True, True, True)
->> > FixedArray._is_missing("1.5"), FixedArray._contains_bool([1, [2, True]])
+>>> FixedArray._is_missing("1.5"), FixedArray._contains_bool([1, [2, True]])
 (False, True)
 ```
 
@@ -3002,8 +3132,8 @@ FixedArray._parse_float_array(arr, target_scale=None)
 ```python
 >>> FixedArray._parse_float_array(np.array([0.1, 0.25]))
 (array([10, 25]), 2)
->> > m, s = FixedArray._parse_float_array(np.array([0.126, 2.5]), target_scale=2)
->> > m.tolist(), s
+>>> m, s = FixedArray._parse_float_array(np.array([0.126, 2.5]), target_scale=2)
+>>> m.tolist(), s
 ([13, 250], 2)
 ```
 
@@ -3018,7 +3148,7 @@ FixedArray._align_mantissas(mantissas, scales, target)
 **示例**
 
 ```python
->> > FixedArray._align_mantissas(np.array([15, 225]), np.array([1, 2]), target=3)
+>>> FixedArray._align_mantissas(np.array([15, 225]), np.array([1, 2]), target=3)
 array([1500, 2250])
 ```
 
@@ -3033,7 +3163,7 @@ FixedArray._round_float_to_scale(values, scale)
 **示例**
 
 ```python
->> > FixedArray._round_float_to_scale(np.array([2.675, 0.3333333]), scale=2)
+>>> FixedArray._round_float_to_scale(np.array([2.675, 0.3333333]), scale=2)
 array([268, 33])
 ```
 
@@ -3055,8 +3185,8 @@ FixedArray._parse_text_array(arr)
 ```python
 >>> FixedArray._parse_text_array(np.array(["1.5", "2.25", "1.5"]))
 (array([150, 225, 150]), 2, None)
->> > m, s, mask = FixedArray._parse_text_array(np.array(["1.5", "nan"]))
->> > m.tolist(), s, mask.tolist()
+>>> m, s, mask = FixedArray._parse_text_array(np.array(["1.5", "nan"]))
+>>> m.tolist(), s, mask.tolist()
 ([15, 0], 1, [False, True])
 ```
 
@@ -3128,7 +3258,7 @@ FixedArray._mul_pow10_float(x, scale)
 ```python
 >>> FixedArray._mul_pow10(np.array([12, -5], dtype=np.int64), 2)
 array([1200, -500])
->> > round(FixedArray._mul_pow10_float(1e-310, 312), 6)
+>>> round(FixedArray._mul_pow10_float(1e-310, 312), 6)
 100.0
 ```
 
@@ -3144,7 +3274,7 @@ FixedArray._divmod_round(m, d, mode="half_up")
 **示例**
 
 ```python
->> > FixedArray._divmod_round(5, 2, mode="half_up"), FixedArray._divmod_round(5, 2, mode="half_even")
+>>> FixedArray._divmod_round(5, 2, mode="half_up"), FixedArray._divmod_round(5, 2, mode="half_even")
 (3, 2)
 >>> FixedArray._divmod_round(np.array([10, -10]), 3, mode="down")
 array([ 3, -3])
@@ -3163,7 +3293,7 @@ FixedArray._doubling_step_10r(r, d)
 
 ```python
 >>> d = np.array([2 ** 62], dtype=np.int64)
->> > r = np.array([2 ** 61], dtype=np.int64)
+>>> r = np.array([2 ** 61], dtype=np.int64)
 >>> FixedArray._doubling_step_10r(r, d)
 (array([5]), array([0]))
 ```
@@ -3240,9 +3370,9 @@ FixedArray._limbs_to_mantissa(limbs, shift, mode)
 **示例**
 
 ```python
->> > from moneta._limbs import limbs_mul
->> > limbs = limbs_mul(np.array([3 * 10 ** 18]), np.array([2 * 10 ** 18]))
->> > FixedArray._limbs_to_mantissa(limbs, shift=18, mode="half_up")
+>>> from moneta._limbs import limbs_mul
+>>> limbs = limbs_mul(np.array([3 * 10 ** 18]), np.array([2 * 10 ** 18]))
+>>> FixedArray._limbs_to_mantissa(limbs, shift=18, mode="half_up")
 array([6000000000000000000])
 ```
 
@@ -3274,23 +3404,25 @@ FixedArray._eq_unrepresentable(other)
 **示例**
 
 ```python
->> >  # 哪怕 scale 相差 30 位（10^30 远超 int64），跨 scale 比较也绝不溢出
->> > bool(FixedArray(1, scale=0) > FixedArray(0, scale=30))
+>>>  # 哪怕 scale 相差 30 位（10^30 远超 int64），跨 scale 比较也绝不溢出
+>>> bool(FixedArray(1, scale=0) > FixedArray(0, scale=30))
 True
->> > bool(FixedArray(1, scale=0) == FixedArray("1.00"))
+>>> bool(FixedArray(1, scale=0) == FixedArray("1.00"))
 True
 ```
 
 ### `FixedArray._array_function` 与 `FixedArray._numpy_equal`
 
 ```python
+moneta.fixed_array._NUMPY_DISPATCHED = frozenset({np.sum, np.mean, np.transpose, np.shape, np.ndim, np.size})
 FixedArray._array_function(func, args, kwargs, name)
 FixedArray._numpy_equal(a1, a2, broadcast, equal_nan=False)
 ```
 
 实现 `__array_function__` 协议白名单分派（供 `FixedArray` 与 [`UnitArray`](unit_array.md) 共用）：
 
-- 允许 `np.sum`、`np.mean`、`np.transpose`、`np.shape`、`np.ndim`、`np.size` 转发至对象自身方法；
+- **`_NUMPY_DISPATCHED`**：允许直接转发至对象自身同名方法/属性的 NumPy 顶层函数白名单集合
+  `frozenset({np.sum, np.mean, np.transpose, np.shape, np.ndim, np.size})`；
 - 将 `np.array_equal`（要求形状相同，`broadcast=False`）与 `np.array_equiv`（允许广播，`broadcast=True`）转发给 `_numpy_equal`
   ，支持 `equal_nan=True` 将对应位置均为 `<NA>` 的元素视为相等；
 - 其余未列入白名单的 NumPy 函数一律抛出 `TypeError`。
@@ -3298,10 +3430,13 @@ FixedArray._numpy_equal(a1, a2, broadcast, equal_nan=False)
 **示例**
 
 ```python
->> > a = FixedArray(["1.50", None])
->> > np.array_equal(a, FixedArray(["1.5", None]), equal_nan=False)
+>>> from moneta.fixed_array import _NUMPY_DISPATCHED
+>>> np.sum in _NUMPY_DISPATCHED and np.max not in _NUMPY_DISPATCHED
+True
+>>> a = FixedArray(["1.50", None])
+>>> np.array_equal(a, FixedArray(["1.5", None]), equal_nan=False)
 False
->> > np.array_equal(a, FixedArray(["1.5", None]), equal_nan=True)
+>>> np.array_equal(a, FixedArray(["1.5", None]), equal_nan=True)
 True
 ```
 

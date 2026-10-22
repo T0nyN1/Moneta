@@ -87,10 +87,10 @@ class moneta._rounding.RoundingMode(str, Enum)
 **示例**
 
 ```python
->> > from moneta import RoundingMode
->> > RoundingMode.HALF_EVEN == "half_even" and isinstance(RoundingMode.HALF_EVEN, str)
+>>> from moneta import RoundingMode
+>>> RoundingMode.HALF_EVEN == "half_even" and isinstance(RoundingMode.HALF_EVEN, str)
 True
->> > [m.value for m in RoundingMode]
+>>> [m.value for m in RoundingMode]
 ['half_up', 'half_even', 'down', 'up', 'floor', 'ceil']
 ```
 
@@ -111,8 +111,8 @@ moneta._rounding._ROUNDINGS = ('half_up', 'half_even', 'down', 'up', 'floor', 'c
 **示例**
 
 ```python
->> > from moneta._rounding import _ROUNDINGS
->> > _ROUNDINGS
+>>> from moneta._rounding import _ROUNDINGS
+>>> _ROUNDINGS
 ('half_up', 'half_even', 'down', 'up', 'floor', 'ceil')
 ```
 
@@ -145,21 +145,15 @@ moneta._rounding.check_rounding(mode)
 **示例**
 
 ```python
->> > from moneta._rounding import RoundingMode, check_rounding
->> > check_rounding(RoundingMode.FLOOR)
+>>> from moneta._rounding import RoundingMode, check_rounding
+>>> check_rounding(RoundingMode.FLOOR)
 'floor'
->> > check_rounding("ceil")
+>>> check_rounding("ceil")
 'ceil'
->> > check_rounding("nearest")
-Traceback(most
-recent
-call
-last):
-...
-ValueError: rounding
-只能是('half_up', 'half_even', 'down', 'up', 'floor', 'ceil')
-之一，收到
-'nearest'
+>>> check_rounding("nearest")
+Traceback (most recent call last):
+    ...
+ValueError: rounding 只能是 ('half_up', 'half_even', 'down', 'up', 'floor', 'ceil') 之一，收到 'nearest'
 ```
 
 **另请参阅**
@@ -211,21 +205,13 @@ NumPy 布尔数组向量化计算。
 向下取整基准（`floor_base=True`）与向零截断基准（`floor_base=False`）对比：
 
 ```python
->> > from moneta._rounding import decide_bump
->> >  # 对 +2.5 取整：q = 2 (偶, odd_q=False), exact_half=True
->> > bool(decide_bump("half_up", is_negative=False, odd_q=False, has_fraction=True, over_half=False, exact_half=True,
-                      floor_base=True))
-True
->> > bool(decide_bump("half_even", is_negative=False, odd_q=False, has_fraction=True, over_half=False, exact_half=True,
-                      floor_base=True))
-False
->> >  # 向零截断基准下对 -2.7 取整：|q| = 2, is_negative=True, over_half=True
->> > int(decide_bump("down", is_negative=True, odd_q=False, has_fraction=True, over_half=True, exact_half=False,
-                     floor_base=False))
-0
->> > int(decide_bump("floor", is_negative=True, odd_q=False, has_fraction=True, over_half=True, exact_half=False,
-                     floor_base=False))
-1
+>>> from moneta._rounding import decide_bump
+>>> kw = dict(is_negative=False, odd_q=False, has_fraction=True, over_half=False, exact_half=True, floor_base=True)
+>>> bool(decide_bump("half_up", **kw)), bool(decide_bump("half_even", **kw))
+(True, False)
+>>> kw_neg = dict(is_negative=True, odd_q=False, has_fraction=True, over_half=True, exact_half=False, floor_base=False)
+>>> int(decide_bump("down", **kw_neg)), int(decide_bump("floor", **kw_neg))
+(0, 1)
 ```
 
 **另请参阅**

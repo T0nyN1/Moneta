@@ -132,10 +132,11 @@ class TestNumpyGuard:
 
     def test_no_implicit_array(self):
         a = L(["1", "2"])
-        for op in (lambda: np.asarray(a), lambda: np.array(a, dtype=float), lambda: np.concatenate([a, a]),
-                   lambda: a.__array__()):
+        for op in (lambda: np.asarray(a), lambda: np.array(a, dtype=float), lambda: a.__array__()):
             with pytest.raises(TypeError, match="Length 不能隐式转成数组"):
                 op()
+        with pytest.raises(TypeError, match="Length 不支持 numpy.concatenate"):
+            np.concatenate([a, a])
 
 
 # ===========================================================================
@@ -166,6 +167,19 @@ class TestUnitPreservingOps:
         with pytest.raises(TypeError):
             np.sum(a, dtype=np.float64)
 
+    def test_numpy_functions(self):
+        a = L(["1.5", "2"], "km")
+        assert np.array_equal(a, L(["1.50", "2"], "km")) is True
+        assert not np.array_equal(a, L(["1.5", "3"], "km")) and not np.array_equal(a, L(["1.5", "2"], "m"))
+        assert not np.array_equal(a, F(["1.5", "2"])) and not np.array_equal(a, L([["1.5", "2"]], "km"))
+        assert np.array_equiv(a, L([["1.5", "2"]] * 2, "km"))
+        assert np.array_equal(Money(["1", "2"], "USD"), Money(["1", "2"], "USD"))
+        assert not np.array_equal(Money("1", "USD"), Money("1", "EUR"))
+        assert np.shape(a) == (2,) and np.ndim(a) == 1 and np.size(a) == 2 and np.transpose(a)._unit == "km"
+        for op in (lambda: np.reshape(a, (2, 1)), lambda: np.sort(a), lambda: np.allclose(a, a)):
+            with pytest.raises(TypeError, match="Length 不支持 numpy."):
+                op()
+
     def test_is_zero(self):
         assert L("0.00").is_zero() == np.True_ and L("0.01").is_zero() == np.False_
         assert isinstance(L("0").is_zero(), np.bool_)
@@ -179,10 +193,22 @@ class TestAsFactor:
         f = F("1.5")
         assert UnitArray._as_factor(f, "乘数") is f
 
-    @pytest.mark.parametrize("value", ["2", True, None, L("1"), [1, "2"]])
+    @pytest.mark.parametrize("value", ["2", True, L("1"), [1, "2"]])
     def test_rejects_non_numeric_with_business_message(self, value):
         with pytest.raises(TypeError, match="乘数只接受数值"):
             UnitArray._as_factor(value, "乘数")
+
+    def test_none_is_missing_value(self):
+        assert UnitArray._as_factor(None, "乘数").isna() and UnitArray._as_factor([None, 1], "乘数").mask.tolist() == \
+               [True, False]
+
+    def test_as_grid_rejects_missing_values(self):
+        assert UnitArray._as_grid(Decimal("0.5"), "步长") == F("0.5")
+        for step in (None, float("nan"), [Decimal("0.5"), None]):
+            with pytest.raises(ValueError, match="步长不能是缺失值"):
+                UnitArray._as_grid(step, "步长")
+        with pytest.raises(TypeError, match="步长只接受数值"):
+            UnitArray._as_grid("0.5", "步长")
 
     def test_construction_errors_pass_through(self):
         from fractions import Fraction
@@ -334,3 +360,93 @@ class TestSubclasses:
             a < make_other("6")
         with pytest.raises(TypeError, match="not supported"):
             a < 6
+
+
+# ===========================================================================
+# 9. 缺失值（NA）与形状方法
+# ===========================================================================
+
+
+class TestMissingValues:
+    def test_isna_notna_and_aliases(self):
+        a = L([None, "1.5", None], "km")
+        assert a.isna().tolist() == [True, False, True] and a.notna().tolist() == [False, True, False]
+        assert a.isnull().tolist() == a.isna().tolist() and a.notnull().tolist() == a.notna().tolist()
+        assert L("1").isna().shape == () and not L("1").isna()
+
+    def test_fillna(self):
+        a = L([None, "1.5"], "km")
+        got = a.fillna(0)
+        assert isinstance(got, Length) and got._unit == "km" and got.isna().tolist() == [False, False]
+        assert got.mantissa.tolist() == [0, 15]
+        assert a.fillna(L("2.25", "km")).mantissa.tolist() == [225, 150]  # 同类对象：对齐到更高精度
+        assert a.fillna(L(["7", "8"], "km")).mantissa.tolist() == [70, 15]
+        with pytest.raises(TypeError, match="单位不匹配"):
+            a.fillna(L("1", "m"))
+        with pytest.raises(TypeError, match="填充值只接受数值"):
+            a.fillna("0")
+        with pytest.raises(ValueError, match="不能是缺失值"):
+            a.fillna(None)
+        b = L(["1", "2"], "km")
+        assert b.fillna(0).data is b.data  # 没有缺失值：底层数据原样保留
+
+    def test_dropna(self):
+        got = L([None, "1.5", "2"], "km").dropna()
+        assert isinstance(got, Length) and got._unit == "km" and got.mantissa.tolist() == [15, 20]
+        with pytest.raises(ValueError, match="1 维"):
+            L([[None, "1"]]).dropna()
+
+    def test_sum_skipna(self):
+        a = L([[None, "1.5"], ["2", "3"]], "km")
+        assert a.sum().data == F("6.5") and a.sum()._unit == "km"
+        assert a.sum(axis=1, skipna=False).isna().tolist() == [True, False]
+        assert a.sum(axis=1, skipna=False).mantissa.tolist() == [0, 50]
+        assert np.sum(a).data == F("6.5")
+
+    def test_is_zero_excludes_missing_values(self):
+        assert L([None, "0", "1"]).is_zero().tolist() == [False, True, False]
+        assert not L(None).is_zero() and isinstance(L(None).is_zero(), np.bool_)
+
+    def test_missing_values_propagate(self):
+        a = L([None, "1.5"], "km")
+        assert (-a).isna().tolist() == [True, False] and abs(a).isna().tolist() == [True, False]
+        assert (a == L(["1", "1.5"], "km")).tolist() == [False, True] and (a != a).tolist() == [True, False]
+        assert (a < L("2", "km")).tolist() == [False, True]
+        assert a[0].isna() and [x.isna() for x in a] == [True, False]
+        with pytest.raises(TypeError, match="缺失值"):
+            bool(L(None))
+        assert np.isnan(a.to_float()[0]) and a.to_decimal().tolist() == [None, Decimal("1.5")]
+
+    def test_swapaxes_and_squeeze(self):
+        a = L([["1", None]], "km")
+        s = a.swapaxes(0, 1)
+        assert isinstance(s, Length) and s._unit == "km" and s.shape == (2, 1) and s.isna().tolist() == [[False],
+                                                                                                         [True]]
+        q = a.squeeze()
+        assert isinstance(q, Length) and q.shape == (2,) and q.isna().tolist() == [False, True]
+        assert a.squeeze(axis=0).shape == (2,)
+        with pytest.raises(ValueError):
+            a.squeeze(axis=1)
+
+
+@pytest.mark.parametrize("name", list(SUBCLASSES))
+class TestSubclassMissingValues:
+    def test_metadata_preserved(self, name):
+        make, _, meta = SUBCLASSES[name]
+        a = make([None, "1.5"])
+        for got in (a.fillna(0), a.dropna(), a.swapaxes(0, 0), a.squeeze(), a.sum(skipna=False)):
+            assert type(got) is type(a) and meta(got) == meta(a)
+        assert a.isna().tolist() == [True, False] and a.is_zero().tolist() == [False, False]
+
+    def test_fillna_with_incompatible_object(self, name):
+        make, make_other, _ = SUBCLASSES[name]
+        with pytest.raises(TypeError):
+            make([None, "1"]).fillna(make_other("1"))
+        assert make([None, "1"]).fillna(make("2")).isna().tolist() == [False, False]
+
+
+@pytest.mark.parametrize("name", list(SUBCLASSES))
+def test_sequence_with_fixed_array_elements(name):
+    make, _, _ = SUBCLASSES[name]
+    got = make([F("1.5"), 2])
+    assert got.mantissa.tolist() == ([150, 200] if name == "Money" else [15, 20])

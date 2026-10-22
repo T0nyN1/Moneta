@@ -104,7 +104,7 @@ Price(FixedArray(10.25, scale=2), quote_currency='USD', base_unit='share')
 
 ## 构造与核心属性
 
-### Price (values, quote_currency, base_unit="share", tick_size=None, scale=None)
+### `Price(values, quote_currency, base_unit="share", tick_size=None, scale=None)`
 
 ```python
 class moneta.Price(values, quote_currency, base_unit="share", tick_size=None, scale=None)
@@ -122,7 +122,8 @@ class moneta.Price(values, quote_currency, base_unit="share", tick_size=None, sc
 - **tick_size** : *数值或数值数组，可选* — 最小变动价位（如 `Decimal("0.01")` 或逐元素步长数组），必须严格为正数且属于数值白名单（不接受字符串）。默认
   `None`。
 - **scale** : *int，可选* — 目标小数位数。默认 `None` 时保留输入自身的精度；指定时，浮点数按最短十进制写法 `half_up`
-  静默舍入，精确输入若超出 `scale` 则先发出 [`PrecisionLossWarning`](unit_array.md#precisionlosswarning) 再按 `half_up`
+  静默舍入，精确输入若在多出的小数位上含有非零数字（缺失位置与末尾多余的 `0` 除外）则先发出 [
+  `PrecisionLossWarning`](fixed_array.md#precisionlosswarning) 再按 `half_up`
   舍入，不足时补零。
 
 **返回值**
@@ -132,24 +133,26 @@ class moneta.Price(values, quote_currency, base_unit="share", tick_size=None, sc
 **异常**
 
 - **TypeError** — `base_unit` 不是 `str`；`tick_size` 不是合法数值（如字符串）；`values` 是量纲不匹配的 `Price`；或 `values`
-  是 `bool`/`None` 等非法类型。
+  是 `bool` 等非法类型。
 - **KeyError** — `quote_currency` 是未注册的货币代码字符串。
-- **ValueError** — `base_unit` 为空字符串；`tick_size <= 0`；`scale` 不是非负整数；或 `quote_currency` 与注册表定义冲突。
+- **ValueError** — `base_unit` 为空字符串；`tick_size <= 0` 或不是标量；`scale` 不是非负整数；或 `quote_currency` 与注册表定义冲突。
 - **OverflowError** — 底层尾数超出 `int64` 范围。
 
 **警告**
 
-- **[`PrecisionLossWarning`](unit_array.md#precisionlosswarning)** — 显式指定 `scale` 且非浮点的精确输入小数位数大于
-  `scale` 时发出。
+- **[`PrecisionLossWarning`](fixed_array.md#precisionlosswarning)** — 显式指定 `scale` 且非浮点的精确输入在超出 `scale`
+  的小数位上含有非零数字时发出。
 
 **机制说明**
 
-1. 依次通过 `get_currency(quote_currency)`、`self._check_unit(base_unit)` 与 `self._as_tick(tick_size)` 解析并校验计价币种、基准单位与正数
+1. 依次通过 `get_currency(quote_currency)`、`self._check_unit(base_unit)` 与 `self._as_tick(tick_size)`
+   解析并校验计价币种、基准单位与正数标量
    `tick_size`；
 2. 若 `values` 已是 `Price`：校验 `values._quote_currency == currency` 且 `_units_compatible(values._base_unit, unit)`
-   ，否则抛 `TypeError`；若本次未显式传入 `tick_size`，则自动继承 `values._tick_size`；
-3. 解析底层 `FixedArray` 并在指定 `scale` 时执行舍入或补零（规则与 [
-   `Quantity`](quantity.md#quantityvalues-unitshare-scalenone) 完全一致）。
+   ，否则抛 `TypeError`；取 `data = values._data`，且若本次未显式传入 `tick_size` 则自动继承 `values._tick_size`；否则取
+   `data = values`；
+3. 直接调用 `self._data = FixedArray(data, scale=scale, on_excess="warn")`：指定 `scale` 时浮点数静默舍入，精确输入丢精度时由
+   `FixedArray` 发出 [`PrecisionLossWarning`](fixed_array.md#precisionlosswarning) 后按 `half_up` 舍入。
 
 **示例**
 
@@ -294,7 +297,7 @@ Price.round_to_step(step=None, rounding="half_up")
 
 **机制说明**
 
-先通过 `FixedArray._check_rounding(rounding)` 校验舍入模式，再取
+先通过 [`check_rounding(rounding)`](_rounding.md#check_rounding) 校验舍入模式，再取
 `grid = self._tick_size if step is None else self._as_tick(step, "step")`。若 `grid is None` 直接返回 `self`；否则返回
 `self._create_like(self._data.round_to_step(grid, rounding=mode))`。
 
@@ -313,7 +316,7 @@ Price(FixedArray([1.230, 1.230, -1.230], scale=3), quote_currency='USD', base_un
 Price(FixedArray([1.250, 1.250, -1.250], scale=3), quote_currency='USD', base_unit='share')
 >>> p.round_to_step(Decimal("0.05")).tick_size
 FixedArray(0.01, scale=2)
->>> Price(["10.23", "10.23"], "USD", tick_size=[Decimal("0.05"), Decimal("0.10")]).round_to_step()
+>> > Price(["10.23", "10.23"], "USD").round_to_step([Decimal("0.05"), Decimal("0.10")])  # 逐元素步长通过 step= 传入
 Price(FixedArray([10.25, 10.20], scale=2), quote_currency='USD', base_unit='share')
 ```
 
@@ -427,7 +430,7 @@ TypeError: 价格量纲不匹配: USD/share vs CNY/share
 
 - [`Price._resolve_unit`](#price_resolve_unit)、[`Price._resolve_tick`](#price_resolve_tick)
 
-### +p、-p 与 abs (p)（正负号与绝对值）
+### `+p`、`-p` 与 `abs(p)`（正负号与绝对值）
 
 ```python
 +p
@@ -662,7 +665,7 @@ Quantity
 ### Price.sum 与 Price.is_zero
 
 ```python
-Price.sum(axis=None, keepdims=False, out=None, dtype=None)
+Price.sum(axis=None, keepdims=False, skipna=True, out=None, dtype=None)
 Price.is_zero()
 ```
 
@@ -752,7 +755,7 @@ Price.to_decimal()
 (1.5, Decimal('1.50'))
 ```
 
-### str (p) 与 repr (p)（文本表示）
+### `str(p)` 与 `repr(p)`（文本表示）
 
 ```python
 str(p)
@@ -893,9 +896,9 @@ Price._resolve_unit(other_unit)
 **示例**
 
 ```python
->> > Price("1.00", "USD", base_unit="Any")._resolve_unit("barrel")
+>>> Price("1.00", "USD", base_unit="Any")._resolve_unit("barrel")
 'barrel'
->> > Price("1.00", "USD", base_unit="barrel")._resolve_unit("Any")
+>>> Price("1.00", "USD", base_unit="barrel")._resolve_unit("Any")
 'barrel'
 ```
 

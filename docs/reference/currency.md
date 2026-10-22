@@ -148,60 +148,42 @@ Currency(code='BHD', digits=3, symbol='BD', name='Bahraini Dinar')
 不可变性保护（禁止修改或删除属性）与非法参数拦截：
 
 ```python
->> > USD.digits = 4
-Traceback(most
-recent
-call
-last):
-...
+>>> USD.digits = 4
+Traceback (most recent call last):
+    ...
 AttributeError: Currency
 是不可变对象，禁止设置属性
 'digits'
->> > del USD._digits
-Traceback(most
-recent
-call
-last):
-...
+>>> del USD._digits
+Traceback (most recent call last):
+    ...
 AttributeError: Currency
 是不可变对象，禁止删除属性
 '_digits'
->> > Currency("US", 2)
-Traceback(most
-recent
-call
-last):
-...
+>>> Currency("US", 2)
+Traceback (most recent call last):
+    ...
 ValueError: 货币代码必须是
 3
 到
 5
 个英文字母，收到
 'US'
->> > Currency("USD", 2.0)
-Traceback(most
-recent
-call
-last):
-...
+>>> Currency("USD", 2.0)
+Traceback (most recent call last):
+    ...
 TypeError: digits
 必须是整数，收到
 float
->> > Currency("USD", True)
-Traceback(most
-recent
-call
-last):
-...
+>>> Currency("USD", True)
+Traceback (most recent call last):
+    ...
 TypeError: digits
 不能是
 bool
->> > Currency("ETH", 19)
-Traceback(most
-recent
-call
-last):
-...
+>>> Currency("ETH", 19)
+Traceback (most recent call last):
+    ...
 ValueError: digits
 必须在
 0
@@ -235,10 +217,10 @@ Currency.code
 **示例**
 
 ```python
->> > from moneta import USD, CNY, Currency
->> > USD.code, CNY.code
+>>> from moneta import USD, CNY, Currency
+>>> USD.code, CNY.code
 ('USD', 'CNY')
->> > Currency(" usdc ", 6).code
+>>> Currency(" usdc ", 6).code
 'USDC'
 ```
 
@@ -373,17 +355,14 @@ hash(c)
 **示例**
 
 ```python
->> > from moneta import Currency, Money, USD, CNY, get_currency
+>>> from moneta import Currency, Money, USD, CNY, get_currency
 >>> Currency("ABC", 2, "$", "Alpha") == Currency("abc", 2)  # symbol 与 name 不影响相等
 True
 >>> Currency("ABC", 2) == Currency("ABC", 3)  # digits 不同则不等
 False
->> > Money(1, Currency("XYZ", 2)) + Money(1, Currency("XYZ", 3))  # 同代码但不同 digits 的未注册币种禁止混算
-Traceback(most
-recent
-call
-last):
-...
+>>> Money(1, Currency("XYZ", 2)) + Money(1, Currency("XYZ", 3))  # 同代码但不同 digits 的未注册币种禁止混算
+Traceback (most recent call last):
+    ...
 TypeError: 币种不匹配: XYZ
 与
 XYZ
@@ -426,17 +405,17 @@ pickle.dumps(c) / pickle.loads(data)
 **示例**
 
 ```python
->> > import copy, pickle
->> > from moneta import Currency, CurrencyRegistry, USD
->> > copy.copy(USD) is USD and copy.deepcopy(USD) is USD
+>>> import copy, pickle
+>>> from moneta import Currency, CurrencyRegistry, USD
+>>> copy.copy(USD) is USD and copy.deepcopy(USD) is USD
 True
->> > pickle.loads(pickle.dumps(USD)) is USD
+>>> pickle.loads(pickle.dumps(USD)) is USD
 True
->> > unregistered = Currency("XYZ", 4, "X", "Custom Xyz")
->> > restored = pickle.loads(pickle.dumps(unregistered))
->> > restored == unregistered and restored is not unregistered
+>>> unregistered = Currency("XYZ", 4, "X", "Custom Xyz")
+>>> restored = pickle.loads(pickle.dumps(unregistered))
+>>> restored == unregistered and restored is not unregistered
 True
->> > CurrencyRegistry.has("XYZ")  # 反序列化未注册币种不会污染注册表
+>>> CurrencyRegistry.has("XYZ")  # 反序列化未注册币种不会污染注册表
 False
 ```
 
@@ -534,35 +513,29 @@ CurrencyRegistry.register(currency)
 **示例**
 
 ```python
->> > from moneta import Currency, CurrencyRegistry, get_currency, USD
->> > bhd = Currency("BHD", 3, "BD", "Bahraini Dinar")
->> > CurrencyRegistry.register(bhd)
->> > CurrencyRegistry.register(Currency("bhd", 3, "BD", "Bahraini Dinar"))  # 相同定义重复注册幂等
->> > get_currency("BHD") is bhd
+>>> from moneta import Currency, CurrencyRegistry, get_currency, USD
+>>> bhd = Currency("BHD", 3, "BD", "Bahraini Dinar")
+>>> CurrencyRegistry.register(bhd)
+>>> CurrencyRegistry.register(Currency("bhd", 3, "BD", "Bahraini Dinar"))  # 相同定义重复注册幂等
+>>> get_currency("BHD") is bhd
 True
->> > CurrencyRegistry.register(Currency("BHD", 2, "BD", "Bahraini Dinar"))  # 精度冲突报错
-Traceback(most
-recent
-call
-last):
-...
+>>> CurrencyRegistry.register(Currency("BHD", 2, "BD", "Bahraini Dinar"))  # 精度冲突报错
+Traceback (most recent call last):
+    ...
 ValueError: 货币代码
 BHD
 已注册为
 Currency(code='BHD', digits=3, symbol='BD', name='Bahraini Dinar')，不能改注册为
 Currency(code='BHD', digits=2, symbol='BD', name='Bahraini Dinar')
->> > CurrencyRegistry.register(Currency("USD", 4, "$", "US Dollar"))  # 内置币种不可覆盖
-Traceback(most
-recent
-call
-last):
-...
+>>> CurrencyRegistry.register(Currency("USD", 4, "$", "US Dollar"))  # 内置币种不可覆盖
+Traceback (most recent call last):
+    ...
 ValueError: 货币代码
 USD
 已注册为
 Currency(code='USD', digits=2, symbol='$', name='US Dollar')，不能改注册为
 Currency(code='USD', digits=4, symbol='$', name='US Dollar')
->> > CurrencyRegistry.clear()
+>>> CurrencyRegistry.clear()
 ```
 
 **另请参阅**
@@ -603,27 +576,21 @@ CurrencyRegistry.get(code)
 **示例**
 
 ```python
->> > from moneta import Currency, CurrencyRegistry, USD
->> > CurrencyRegistry.get(" usd ") is USD
+>>> from moneta import Currency, CurrencyRegistry, USD
+>>> CurrencyRegistry.get(" usd ") is USD
 True
->> > CurrencyRegistry.get(Currency("USD", 2, "$", "US Dollar")) is USD  # 等价实例归并为单例
+>>> CurrencyRegistry.get(Currency("USD", 2, "$", "US Dollar")) is USD  # 等价实例归并为单例
 True
->> > custom = Currency("XYZ", 4)
->> > CurrencyRegistry.get(custom) is custom  # 未注册实例原样返回
+>>> custom = Currency("XYZ", 4)
+>>> CurrencyRegistry.get(custom) is custom  # 未注册实例原样返回
 True
->> > CurrencyRegistry.get("XYZ")  # 未注册字符串代码报错
-Traceback(most
-recent
-call
-last):
-...
+>>> CurrencyRegistry.get("XYZ")  # 未注册字符串代码报错
+Traceback (most recent call last):
+    ...
 KeyError: "未注册的货币代码: 'XYZ'"
->> > CurrencyRegistry.get(Currency("USD", 3, "$", "US Dollar"))  # 与已注册定义冲突报错
-Traceback(most
-recent
-call
-last):
-...
+>>> CurrencyRegistry.get(Currency("USD", 3, "$", "US Dollar"))  # 与已注册定义冲突报错
+Traceback (most recent call last):
+    ...
 ValueError: Currency(code='USD', digits=3, symbol='$', name='US Dollar')
 与注册表中的定义
 Currency(code='USD', digits=2, symbol='$', name='US Dollar')
@@ -662,10 +629,10 @@ CurrencyRegistry.has(code)
 **示例**
 
 ```python
->> > from moneta import Currency, CurrencyRegistry, USD
->> > CurrencyRegistry.has("cny"), CurrencyRegistry.has(USD)
+>>> from moneta import Currency, CurrencyRegistry, USD
+>>> CurrencyRegistry.has("cny"), CurrencyRegistry.has(USD)
 (True, True)
->> > CurrencyRegistry.has("XYZ"), CurrencyRegistry.has(Currency("USD", 3)), CurrencyRegistry.has(None)
+>>> CurrencyRegistry.has("XYZ"), CurrencyRegistry.has(Currency("USD", 3)), CurrencyRegistry.has(None)
 (False, False, False)
 ```
 
@@ -694,12 +661,12 @@ CurrencyRegistry.clear()
 **示例**
 
 ```python
->> > from moneta import Currency, CurrencyRegistry, USD
->> > CurrencyRegistry.register(Currency("XYZ", 4))
->> > CurrencyRegistry.has("XYZ")
+>>> from moneta import Currency, CurrencyRegistry, USD
+>>> CurrencyRegistry.register(Currency("XYZ", 4))
+>>> CurrencyRegistry.has("XYZ")
 True
->> > CurrencyRegistry.clear()
->> > CurrencyRegistry.has("XYZ"), CurrencyRegistry.get("USD") is USD
+>>> CurrencyRegistry.clear()
+>>> CurrencyRegistry.has("XYZ"), CurrencyRegistry.get("USD") is USD
 (False, True)
 ```
 
@@ -736,17 +703,14 @@ moneta.get_currency(cur)
 **示例**
 
 ```python
->> > from moneta import get_currency, Money, CNY, EUR, USD, Currency
->> > get_currency("cny") is CNY and get_currency(EUR) is EUR
+>>> from moneta import get_currency, Money, CNY, EUR, USD, Currency
+>>> get_currency("cny") is CNY and get_currency(EUR) is EUR
 True
->> > Money("10.00", "usd").currency is USD
+>>> Money("10.00", "usd").currency is USD
 True
->> > Money(1, Currency("USD", 3))  # 拒绝与注册表冲突的伪造 USD 实例
-Traceback(most
-recent
-call
-last):
-...
+>>> Money(1, Currency("USD", 3))  # 拒绝与注册表冲突的伪造 USD 实例
+Traceback (most recent call last):
+    ...
 ValueError: Currency(code='USD', digits=3, symbol='', name='USD')
 与注册表中的定义
 Currency(code='USD', digits=2, symbol='$', name='US Dollar')
@@ -809,8 +773,8 @@ moneta.currency._MAX_DIGITS = 18
 **示例**
 
 ```python
->> > from moneta.currency import _CODE_RE, _MAX_DIGITS
->> > bool(_CODE_RE.match("USDT")), bool(_CODE_RE.match("US")), _MAX_DIGITS
+>>> from moneta.currency import _CODE_RE, _MAX_DIGITS
+>>> bool(_CODE_RE.match("USDT")), bool(_CODE_RE.match("US")), _MAX_DIGITS
 (True, False, 18)
 ```
 
@@ -835,8 +799,8 @@ Currency._definition()
 **示例**
 
 ```python
->> > from moneta import USD
->> > USD._definition()
+>>> from moneta import USD
+>>> USD._definition()
 ('USD', 2, '$', 'US Dollar')
 ```
 
@@ -877,16 +841,13 @@ moneta.currency._restore_currency(code, digits, symbol, name)
 **示例**
 
 ```python
->> > from moneta import USD
->> > from moneta.currency import _restore_currency
->> > _restore_currency("USD", 2, "$", "US Dollar") is USD
+>>> from moneta import USD
+>>> from moneta.currency import _restore_currency
+>>> _restore_currency("USD", 2, "$", "US Dollar") is USD
 True
->> > _restore_currency("USD", 3, "$", "US Dollar")
-Traceback(most
-recent
-call
-last):
-...
+>>> _restore_currency("USD", 3, "$", "US Dollar")
+Traceback (most recent call last):
+    ...
 ValueError: pickle
 中的
 Currency(code='USD', digits=3, symbol='$', name='US Dollar')
