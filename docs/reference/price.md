@@ -8,17 +8,17 @@
 `is_on_step`](#priceis_on_step) 对齐或检验报价网格。
 
 ```python
->> > from decimal import Decimal
->> > from moneta import Price, Quantity, Money
->> > p = Price(["189.50", "190.25"], "USD", base_unit="share", tick_size=Decimal("0.05"))
->> > p.quote_currency.code, p.base_unit, p.tick_size
+>>> from decimal import Decimal
+>>> from moneta import Price, Quantity, Money
+>>> p = Price(["189.50", "190.25"], "USD", base_unit="share", tick_size=Decimal("0.05"))
+>>> p.quote_currency.code, p.base_unit, p.tick_size
 ('USD', 'share', FixedArray(0.05, scale=2))
->> > p * Quantity([10, 20], unit="share")  # Price * Quantity -> Money (成交金额)
+>>> p * Quantity([10, 20], unit="share")  # Price * Quantity -> Money (成交金额)
 Money(FixedArray([1895.00, 3805.00], scale=2), currency='USD')
->> > ask, bid = Price("101.25", "USD"), Price("101.20", "USD")
->> > ask - bid  # 同量纲价差 (Spread)
+>>> ask, bid = Price("101.25", "USD"), Price("101.20", "USD")
+>>> ask - bid  # 同量纲价差 (Spread)
 Price(FixedArray(0.05, scale=2), quote_currency='USD', base_unit='share')
->> > Price("10.23", "USD", tick_size=Decimal("0.05")).round_to_step()
+>>> Price("10.23", "USD", tick_size=Decimal("0.05")).round_to_step()
 Price(FixedArray(10.25, scale=2), quote_currency='USD', base_unit='share')
 ```
 
@@ -314,7 +314,7 @@ Price(FixedArray([1.230, 1.230, -1.230], scale=3), quote_currency='USD', base_un
 Price(FixedArray([1.250, 1.250, -1.250], scale=3), quote_currency='USD', base_unit='share')
 >>> p.round_to_step(Decimal("0.05")).tick_size
 FixedArray(0.01, scale=2)
->> > Price(["10.23", "10.23"], "USD").round_to_step([Decimal("0.05"), Decimal("0.10")])  # 逐元素步长通过 step= 传入
+>>> Price(["10.23", "10.23"], "USD").round_to_step([Decimal("0.05"), Decimal("0.10")])  # 逐元素步长通过 step= 传入
 Price(FixedArray([10.25, 10.20], scale=2), quote_currency='USD', base_unit='share')
 ```
 
@@ -487,10 +487,10 @@ other * p
 计算成交金额（`Price * Quantity -> Money`）与双向 `"Any"` 通配：
 
 ```python
->> > from moneta import Price, Quantity
->> > Price("189.50", "USD") * Quantity(10, "share")
+>>> from moneta import Price, Quantity
+>>> Price("189.50", "USD") * Quantity(10, "share")
 Money(FixedArray(1895.00, scale=2), currency='USD')
->> > Quantity(3, "barrel") * Price("80.25", "USD", base_unit="Any")
+>>> Quantity(3, "barrel") * Price("80.25", "USD", base_unit="Any")
 Money(FixedArray(240.75, scale=2), currency='USD')
 ```
 
@@ -546,17 +546,14 @@ Price.multiply(other, scale=None, rounding="half_up")
 **示例**
 
 ```python
->> > from moneta import Price, Quantity
->> > Price("0.001", "USD").multiply(Quantity("0.4"), rounding="up")
+>>> from moneta import Price, Quantity
+>>> Price("0.001", "USD").multiply(Quantity("0.4"), rounding="up")
 Money(FixedArray(0.01, scale=2), currency='USD')
->> > Price("1.37", "USD").multiply(3, scale=1, rounding="half_up")
+>>> Price("1.37", "USD").multiply(3, scale=1, rounding="half_up")
 Price(FixedArray(4.1, scale=1), quote_currency='USD', base_unit='share')
->> > Price("1.00", "USD").multiply(Quantity(3), scale=4)
-Traceback(most
-recent
-call
-last):
-...
+>>> Price("1.00", "USD").multiply(Quantity(3), scale=4)
+Traceback (most recent call last):
+    ...
 ValueError: 结果为
 Money
 时精度固定为币种精度，不能指定
@@ -638,16 +635,13 @@ Price.divide(other, scale=None, rounding="half_up")
 **示例**
 
 ```python
->> > Price("1.00", "USD").divide(Price("3.00", "USD"), scale=3, rounding="up")
+>>> Price("1.00", "USD").divide(Price("3.00", "USD"), scale=3, rounding="up")
 FixedArray(0.334, scale=3)
->> > Price("10.00", "USD").divide(3, scale=2)
+>>> Price("10.00", "USD").divide(3, scale=2)
 Price(FixedArray(3.33, scale=2), quote_currency='USD', base_unit='share')
->> > Price("10.00", "USD").divide(Quantity(2))
-Traceback(most
-recent
-call
-last):
-...
+>>> Price("10.00", "USD").divide(Quantity(2))
+Traceback (most recent call last):
+    ...
 TypeError: 价格只能除以数值或同类
 Price，收到
 Quantity
@@ -853,17 +847,12 @@ Price._check_compatible(other)
 **示例**
 
 ```python
->> > p = Price("10.00", "USD", base_unit="barrel")
->> > p._check_compatible(Price("12.00", "USD", base_unit="Any"))
->> > p._check_compatible(Price("12.00", "USD", base_unit="share"))
-Traceback(most
-recent
-call
-last):
-...
-TypeError: 价格量纲不匹配: USD / barrel
-vs
-USD / share
+>>> p = Price("10.00", "USD", base_unit="barrel")
+>>> p._check_compatible(Price("12.00", "USD", base_unit="Any"))
+>>> p._check_compatible(Price("12.00", "USD", base_unit="share"))
+Traceback (most recent call last):
+    ...
+TypeError: 价格量纲不匹配: USD/barrel vs USD/share
 ```
 
 ### Price._resolve_unit

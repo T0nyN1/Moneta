@@ -2,7 +2,7 @@
 
 `moneta._units` 定义金融资产数量与标价中使用的非货币物理单位规范（[`check_unit`](#check_unit)）、通配单位常量（[
 `WILDCARD_UNIT`](#wildcard_unit)）以及对称的单位兼容性判定函数（[`units_compatible`](#units_compatible)），为 [
-`Quantity`](quantity.md)、[`Price`](price.md)、[`Instrument`](instrument.md) 与 `PositionLot`
+`Quantity`](quantity.md)、[`Price`](price.md)、[`Instrument`](instrument.md) 与 [`PositionLot`](lot.md)
 提供全库一致的单位校验与通配匹配规则。其中 [`WILDCARD_UNIT`](#wildcard_unit) 同时由 [
 `moneta.quantity`](quantity.md#wildcard_unit) 重导出。
 
@@ -40,7 +40,7 @@
 | [`Quantity`](quantity.md)     | 调用 [`check_unit(unit)`](#check_unit)（允许 `"Any"`，默认 `"share"`）；从已有 `Quantity` 构造时用 [`units_compatible`](#units_compatible) 校验并可将 `"Any"` 窄化为具体单位 | 加减、比率除法、比较通过 [`units_compatible`](#units_compatible) 判兼容；加减结果单位通过 [`_resolve_unit`](quantity.md#quantity_resolve_unit) 收敛为非 `"Any"` 的具体单位                                             |
 | [`Price`](price.md)           | 调用 [`check_unit(base_unit)`](#check_unit)（允许 `"Any"`，默认 `"share"`）；从已有 `Price` 构造时用 [`units_compatible`](#units_compatible) 校验                            | 同币种 `Price` 之间的加减、比率除法、比较以及 `Price * Quantity` 均通过 [`units_compatible`](#units_compatible) 判兼容；加减结果 `base_unit` 收敛为具体单位                                                            |
 | [`Instrument`](instrument.md) | 调用 [`check_unit(base_unit)`](#check_unit)，但**额外禁止 `base_unit == "Any"`**（具体金融合约必须绑定明确的物理或合约单位）                                                 | [`as_price`](instrument.md#instrumentas_price) 与 [`calc_notional`](instrument.md#instrumentcalc_notional) 通过 [`units_compatible`](#units_compatible) 接受单位为 `self.base_unit` 或 `"Any"` 的 `Price` / `Quantity` |
-| `PositionLot`                 | 证券批次要求持仓 `Quantity` 的单位与 `asset.base_unit` 满足 [`units_compatible`](#units_compatible)，并统一归一化存储为 `asset.base_unit`                                    | `split` 与 `match_lots` 扣减数量时同样通过 [`units_compatible`](#units_compatible) 校验并归一化到批次基准单位                                                                                                          |
+| [`PositionLot`](lot.md)       | 证券批次要求持仓 `Quantity` 的单位与 `asset.base_unit` 满足 [`units_compatible`](#units_compatible)，并统一归一化存储为 `asset.base_unit`                                    | [`split`](lot.md#positionlotsplit) 与 [`match_lots`](lot.md#match_lots) 扣减数量时同样通过 [`units_compatible`](#units_compatible) 校验并归一化到批次基准单位                                                         |
 
 ## API 速查表
 

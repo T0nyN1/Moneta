@@ -136,12 +136,12 @@ class moneta.Currency(code, digits, symbol="", name="")
 构造自定义币种与自动标准化：
 
 ```python
->> > from moneta import Currency, USD
->> > bhd = Currency("bhd", 3, "BD", "Bahraini Dinar")
->> > bhd
+>>> from moneta import Currency, USD
+>>> bhd = Currency("bhd", 3, "BD", "Bahraini Dinar")
+>>> bhd
 Currency(code='BHD', digits=3, symbol='BD', name='Bahraini Dinar')
->> > usdt = Currency(" usdt ", np.int64(6))  # 自动去空白、转大写，name 默认等于 code
->> > (usdt.code, usdt.digits, usdt.symbol, usdt.name)
+>>> usdt = Currency(" usdt ", np.int64(6))  # 自动去空白、转大写，name 默认等于 code
+>>> (usdt.code, usdt.digits, usdt.symbol, usdt.name)
 ('USDT', 6, '', 'USDT')
 ```
 
@@ -881,10 +881,10 @@ moneta.currency._init_defaults()
 **示例**
 
 ```python
->> > from moneta import CurrencyRegistry, JPY
->> > from moneta.currency import _init_defaults
->> > _init_defaults()  # 幂等重入，无副作用
->> > CurrencyRegistry.get("JPY") is JPY
+>>> from moneta import CurrencyRegistry, JPY
+>>> from moneta.currency import _init_defaults
+>>> _init_defaults()  # 幂等重入，无副作用
+>>> CurrencyRegistry.get("JPY") is JPY
 True
 ```
 

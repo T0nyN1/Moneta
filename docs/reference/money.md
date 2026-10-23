@@ -8,17 +8,17 @@
 `calc_tiered_fee`](#moneycalc_tiered_fee)）。
 
 ```python
->> > from decimal import Decimal
->> > from moneta import Money, USD, JPY
->> > m = Money(["100.50", "200.25", "-50.00"], "USD")
->> > m.currency, m.scale, m.units.tolist()
+>>> from decimal import Decimal
+>>> from moneta import Money, USD, JPY
+>>> m = Money(["100.50", "200.25", "-50.00"], "USD")
+>>> m.currency, m.scale, m.units.tolist()
 (Currency(code='USD', digits=2, symbol='$', name='US Dollar'), 2, [10050, 20025, -5000])
->> > m.sum()
+>>> m.sum()
 Money(FixedArray(250.75, scale=2), currency='USD')
->> > Money("100.00", "USD").allocate([1, 1, 1])  # 最大余数法守恒分配，零头不丢
+>>> Money("100.00", "USD").allocate([1, 1, 1])  # 最大余数法守恒分配，零头不丢
 [Money(FixedArray(33.34, scale=2), currency='USD'), Money(FixedArray(33.33, scale=2), currency='USD'),
  Money(FixedArray(33.33, scale=2), currency='USD')]
->> > divmod(Money("10.00", "USD"), 3)  # 均分 3 份：(每份金额, 剩余零头)
+>>> divmod(Money("10.00", "USD"), 3)  # 均分 3 份：(每份金额, 剩余零头)
 (Money(FixedArray(3.33, scale=2), currency='USD'), Money(FixedArray(0.01, scale=2), currency='USD'))
 ```
 
@@ -663,14 +663,14 @@ m / other
 **示例**
 
 ```python
->> > from moneta import Money, Price, Quantity
->> > Money("10.00", "USD") / 3  # Money / 无量纲数 -> Money (scale=2)
+>>> from moneta import Money, Price, Quantity
+>>> Money("10.00", "USD") / 3  # Money / 无量纲数 -> Money (scale=2)
 Money(FixedArray(3.33, scale=2), currency='USD')
->> > Money("1.00", "USD") / Money("3.00", "USD")  # Money / Money -> FixedArray (scale = 2 + 8 = 10)
+>>> Money("1.00", "USD") / Money("3.00", "USD")  # Money / Money -> FixedArray (scale = 2 + 8 = 10)
 FixedArray(0.3333333333, scale=10)
->> > Money("1895.00", "USD") / Price("189.50", "USD", base_unit="share")  # Money / Price -> Quantity
+>>> Money("1895.00", "USD") / Price("189.50", "USD", base_unit="share")  # Money / Price -> Quantity
 Quantity(FixedArray(10.0000000000, scale=10), unit='share')
->> > Money("100.00", "USD") / Quantity(4, unit="barrel")  # Money / Quantity -> Price
+>>> Money("100.00", "USD") / Quantity(4, unit="barrel")  # Money / Quantity -> Price
 Price(FixedArray(25.0000000000, scale=10), quote_currency='USD', base_unit='barrel')
 ```
 
@@ -728,15 +728,15 @@ Money.divide(other, rounding="half_up", step=None, scale=None)
 **示例**
 
 ```python
->> > from decimal import Decimal
->> > from moneta import Money, Quantity
->> > Money("-10.00", "USD").divide(3, rounding="floor")
+>>> from decimal import Decimal
+>>> from moneta import Money, Quantity
+>>> Money("-10.00", "USD").divide(3, rounding="floor")
 Money(FixedArray(-3.34, scale=2), currency='USD')
->> > Money("1.00", "USD").divide(Decimal("20.04"), step=Decimal("0.10"))  # 0.0499... 一步舍入到 0.10 得 0.00
+>>> Money("1.00", "USD").divide(Decimal("20.04"), step=Decimal("0.10"))  # 0.0499... 一步舍入到 0.10 得 0.00
 Money(FixedArray(0.00, scale=2), currency='USD')
->> > Money("1.00", "USD").divide(Money("3.00", "USD"), scale=4, rounding="up")
+>>> Money("1.00", "USD").divide(Money("3.00", "USD"), scale=4, rounding="up")
 FixedArray(0.3334, scale=4)
->> > Money("100.00", "USD").divide(Quantity(3, "share"), scale=2)
+>>> Money("100.00", "USD").divide(Quantity(3, "share"), scale=2)
 Price(FixedArray(33.33, scale=2), quote_currency='USD', base_unit='share')
 ```
 
@@ -897,9 +897,9 @@ Money(FixedArray(2.33, scale=2), currency='USD')
 Money(FixedArray(0.01, scale=2), currency='USD')
 >>> np.mean(Money(["1.00", "2.00"], "USD"))
 Money(FixedArray(1.50, scale=2), currency='USD')
->> > m_na = Money(["1.00", None, "2.00"], "USD")
->> > m_na.mean(), m_na.mean(skipna=False)
-(Money(FixedArray(1.50, scale=2), currency='USD'), Money(FixedArray( < NA >, scale=2), currency='USD'))
+>>> m_na = Money(["1.00", None, "2.00"], "USD")
+>>> m_na.mean(), m_na.mean(skipna=False)
+(Money(FixedArray(1.50, scale=2), currency='USD'), Money(FixedArray(<NA>, scale=2), currency='USD'))
 ```
 
 **性能对比**
@@ -1472,14 +1472,11 @@ Money._check_compatible(other)
 **示例**
 
 ```python
->> > m = Money("1.00", "USD")
->> > m._check_compatible(Money("2.00", "USD"))
->> > m._check_compatible(Money("2.00", "CNY"))
-Traceback(most
-recent
-call
-last):
-...
+>>> m = Money("1.00", "USD")
+>>> m._check_compatible(Money("2.00", "USD"))
+>>> m._check_compatible(Money("2.00", "CNY"))
+Traceback (most recent call last):
+    ...
 TypeError: 币种不匹配: USD
 与
 CNY
@@ -1578,10 +1575,10 @@ Money._fill_value(value)
 **示例**
 
 ```python
->> > m = Money(["1.00", None], "USD")
->> > m._fill_value(2.5)
+>>> m = Money(["1.00", None], "USD")
+>>> m._fill_value(2.5)
 FixedArray(2.50, scale=2)
->> > m.fillna("2.5")
+>>> m.fillna("2.5")
 Traceback (most recent call last):
     ...
 TypeError: 填充值只接受数值（int、float、Decimal、Fraction、FixedArray
@@ -1678,11 +1675,11 @@ Money._fused_round_step(floor, inexact, step, mode)
 **示例**
 
 ```python
->> > m = Money("1.00", "USD")
->> > step = m._as_step(FixedArray("0.10"))  # step.scale == 2, t = 3
->> > m._fused_round_step(FixedArray("0.049"), np.array(True), step, "half_up")  # v = 0.0499 > 0.049 (inexact=True)
+>>> m = Money("1.00", "USD")
+>>> step = m._as_step(FixedArray("0.10"))  # step.scale == 2, t = 3
+>>> m._fused_round_step(FixedArray("0.049"), np.array(True), step, "half_up")  # v = 0.0499 > 0.049 (inexact=True)
 FixedArray(0.00, scale=2)
->> > m._fused_round_step(FixedArray("0.050"), np.array(False), step, "half_up")  # v = 0.0500 == 0.050 (inexact=False)
+>>> m._fused_round_step(FixedArray("0.050"), np.array(False), step, "half_up")  # v = 0.0500 == 0.050 (inexact=False)
 FixedArray(0.10, scale=2)
 ```
 

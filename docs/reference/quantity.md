@@ -921,15 +921,12 @@ Quantity._check_compatible(other)
 **示例**
 
 ```python
->> > q = Quantity(1, unit="barrel")
->> > q._check_compatible(Quantity(2, unit="barrel"))
->> > q._check_compatible(Quantity(2, unit="Any"))
->> > q._check_compatible(Quantity(2, unit="share"))
-Traceback(most
-recent
-call
-last):
-...
+>>> q = Quantity(1, unit="barrel")
+>>> q._check_compatible(Quantity(2, unit="barrel"))
+>>> q._check_compatible(Quantity(2, unit="Any"))
+>>> q._check_compatible(Quantity(2, unit="share"))
+Traceback (most recent call last):
+    ...
 TypeError: 单位不匹配: barrel
 与
 share

@@ -2,19 +2,19 @@
 
 `moneta._utils` 提供无状态的内部通用技术工具函数，涵盖 `int64` 极值绝对值提取（[`max_abs`](#max_abs)）、多格式日期解析（[
 `to_date`](#to_date)）、公历闰年判定（[`is_leap_year`](#is_leap_year)）以及跨包内部栈帧的动态告警层级计算（[
-`user_stacklevel`](#user_stacklevel)），支撑 [`FixedArray`](fixed_array.md)、`conventions`、`cashflow` 与 `lot` 等模块。
+`user_stacklevel`](#user_stacklevel)），支撑 [`FixedArray`](fixed_array.md)、`conventions`、`cashflow` 与 [`lot`](lot.md) 等模块。
 
 ```python
->> > from datetime import date, datetime
->> > import numpy as np
->> > from moneta._utils import is_leap_year, max_abs, to_date, user_stacklevel
->> > max_abs(np.array([-(1 << 63), 100], dtype=np.int64)) == 1 << 63
+>>> from datetime import date, datetime
+>>> import numpy as np
+>>> from moneta._utils import is_leap_year, max_abs, to_date, user_stacklevel
+>>> max_abs(np.array([-(1 << 63), 100], dtype=np.int64)) == 1 << 63
 True
->> > to_date("2024-02-29"), to_date(datetime(2024, 2, 29, 15, 30))
+>>> to_date("2024-02-29"), to_date(datetime(2024, 2, 29, 15, 30))
 (datetime.date(2024, 2, 29), datetime.date(2024, 2, 29))
->> > is_leap_year(2024), is_leap_year(1900), is_leap_year(2000)
+>>> is_leap_year(2024), is_leap_year(1900), is_leap_year(2000)
 (True, False, True)
->> > user_stacklevel() >= 1
+>>> user_stacklevel() >= 1
 True
 ```
 
@@ -34,7 +34,7 @@ True
 
 ### 2. 多源日期归一化与语义化报错（`to_date` 与 `is_leap_year`）
 
-在持仓批次（`PositionLot`）、计日惯例（`year_fraction`）与现金流排程（`CashFlow`）中，所有涉及日期的参数均通过 [
+在持仓批次（[`PositionLot`](lot.md)）、计日惯例（`year_fraction`）与现金流排程（`CashFlow`）中，所有涉及日期的参数均通过 [
 `to_date(value, what="日期")`](#to_date) 统一归一化为标准库的 `datetime.date` 对象：
 
 - 若传入 `datetime.datetime`（注意 `issubclass(datetime, date)` 为 `True`，故必须先判 `datetime`），自动调用 `.date()`
@@ -95,13 +95,13 @@ moneta._utils.max_abs(x)
 **示例**
 
 ```python
->> > import numpy as np
->> > from moneta._utils import max_abs
->> > max_abs(np.array([-(1 << 63), 5], dtype=np.int64)) == 1 << 63
+>>> import numpy as np
+>>> from moneta._utils import max_abs
+>>> max_abs(np.array([-(1 << 63), 5], dtype=np.int64)) == 1 << 63
 True
->> > max_abs(np.array([[-9, 2], [7, -3]], dtype=np.int64))
+>>> max_abs(np.array([[-9, 2], [7, -3]], dtype=np.int64))
 9
->> > max_abs(np.array([], dtype=np.int64)), max_abs(np.zeros((0, 3), dtype=np.int64))
+>>> max_abs(np.array([], dtype=np.int64)), max_abs(np.zeros((0, 3), dtype=np.int64))
 (0, 0)
 ```
 
@@ -141,38 +141,24 @@ moneta._utils.to_date(value, what="日期")
 **示例**
 
 ```python
->> > from datetime import date, datetime
->> > from moneta._utils import to_date
->> > to_date(date(2024, 1, 2)), to_date(datetime(2024, 1, 2, 15, 30)), to_date("  2024-01-02\t")
+>>> from datetime import date, datetime
+>>> from moneta._utils import to_date
+>>> to_date(date(2024, 1, 2)), to_date(datetime(2024, 1, 2, 15, 30)), to_date("  2024-01-02\t")
 (datetime.date(2024, 1, 2), datetime.date(2024, 1, 2), datetime.date(2024, 1, 2))
->> > to_date("2024/01/02", "acquired_date")
-Traceback(most
-recent
-call
-last):
-...
-ValueError: acquired_date
-不是合法的
-ISO
-日期: '2024/01/02'
->> > to_date(20240102, "as_of_date")
-Traceback(most
-recent
-call
-last):
-...
-TypeError: as_of_date
-必须是
-date、datetime
-或
-ISO
-字符串，收到
-int
+>>> to_date("2024/01/02", "acquired_date")
+Traceback (most recent call last):
+    ...
+ValueError: acquired_date 不是合法的 ISO 日期: '2024/01/02'
+>>> to_date(20240102, "as_of_date")
+Traceback (most recent call last):
+    ...
+TypeError: as_of_date 必须是 date、datetime 或 ISO 字符串，收到 int
 ```
 
 **另请参阅**
 
 - [`is_leap_year`](#is_leap_year)
+- [`PositionLot.holding_days`](lot.md#positionlotholding_days)
 
 ### `is_leap_year`
 
@@ -193,8 +179,8 @@ moneta._utils.is_leap_year(year)
 **示例**
 
 ```python
->> > from moneta._utils import is_leap_year
->> > [is_leap_year(y) for y in (1900, 2000, 2023, 2024, 2100)]
+>>> from moneta._utils import is_leap_year
+>>> [is_leap_year(y) for y in (1900, 2000, 2023, 2024, 2100)]
 [False, True, False, True, False]
 ```
 
@@ -227,18 +213,9 @@ moneta._utils.user_stacklevel()
 **示例**
 
 ```python
->> > import warnings
->> > from moneta import Money, PrecisionLossWarning
->> > from moneta._utils import user_stacklevel
->> > user_stacklevel()
+>>> from moneta._utils import user_stacklevel
+>>> user_stacklevel()
 1
->> > with warnings.catch_warnings(record=True) as record:
-    ...
-warnings.simplefilter("always")
-...
-_ = Money("1.005", "USD")
->> > len(record) == 1 and issubclass(record[0].category, PrecisionLossWarning)
-True
 ```
 
 **另请参阅**

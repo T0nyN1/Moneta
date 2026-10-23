@@ -31,12 +31,10 @@ Moneta 自下而上分为四层，上层只依赖下层：
 └────────────────────────────────────────────────────────────────────┘
 ```
 
-- **数值内核**：[`FixedArray`](reference/fixed_array.md)（配合底层的 [`_rounding`](reference/_rounding.md)
-  舍入裁决引擎与 [`_limbs`](reference/_limbs.md) Base $2^{21}$ 多精度分块算术内核）是全部精确运算的基础，它只认识“数”，不认识币种或单位。
-- **量纲层**：在 `FixedArray` 之上通过 [`UnitArray`](reference/unit_array.md) 附加单位与币种（[
-  `Currency`](reference/currency.md)、[`CurrencyRegistry`](reference/currency.md#currencyregistry)），阻止不同量纲之间的非法运算。
+- **数值内核**：[`FixedArray`](reference/fixed_array.md)（配合底层的 [`_rounding`](reference/_rounding.md) 舍入裁决引擎、[`_limbs`](reference/_limbs.md) Base $2^{21}$ 多精度分块算术内核与 [`_utils`](reference/_utils.md) 通用技术工具）是全部精确运算的基础，它只认识“数”，不认识币种或单位。
+- **量纲层**：在 `FixedArray` 之上通过 [`UnitArray`](reference/unit_array.md) 与 [`_units`](reference/_units.md) 附加物理单位及币种（[`Currency`](reference/currency.md)、[`CurrencyRegistry`](reference/currency.md#currencyregistry)），阻止不同量纲之间的非法运算。
 - **业务对象**：金额（[`Money`](reference/money.md)）、价格（[`Price`](reference/price.md)）、数量（[
-  `Quantity`](reference/quantity.md)）、标的、持仓批次等金融语义对象，本身也可以是数组（张量）。
+  `Quantity`](reference/quantity.md)）、标的（[`Instrument`](reference/instrument.md)）、持仓批次（[`PositionLot`](reference/lot.md)）等金融语义对象，本身也可以是数组（张量）。
 - **应用层**：组合估值、汇率引擎、现金流排程与货币时间价值计算。
 
 ## 安装

@@ -5,14 +5,14 @@
 其中公开枚举 [`RoundingMode`](#roundingmode) 同时由顶层 `moneta` 与 `moneta.fixed_array` 重导出。
 
 ```python
->> > from moneta._rounding import RoundingMode, check_rounding, decide_bump, round_quotient
->> > check_rounding(RoundingMode.HALF_EVEN), check_rounding("half_up")
+>>> from moneta._rounding import RoundingMode, check_rounding, decide_bump, round_quotient
+>>> check_rounding(RoundingMode.HALF_EVEN), check_rounding("half_up")
 ('half_even', 'half_up')
->> > q, r = divmod(-7, 2)  # -7 = (-4) * 2 + 1
->> > round_quotient(q, r, 2, "half_up"), round_quotient(q, r, 2, "half_even")
+>>> q, r = divmod(-7, 2)  # -7 = (-4) * 2 + 1
+>>> round_quotient(q, r, 2, "half_up"), round_quotient(q, r, 2, "half_even")
 (-4, -4)
->> > q2, r2 = divmod(-5, 2)  # -5 = (-3) * 2 + 1
->> > round_quotient(q2, r2, 2, "half_up"), round_quotient(q2, r2, 2, "half_even")
+>>> q2, r2 = divmod(-5, 2)  # -5 = (-3) * 2 + 1
+>>> round_quotient(q2, r2, 2, "half_up"), round_quotient(q2, r2, 2, "half_even")
 (-3, -2)
 ```
 
@@ -257,13 +257,13 @@ moneta._rounding.round_quotient(q, r, d, mode)
 **示例**
 
 ```python
->> > import numpy as np
->> > from moneta._rounding import round_quotient
->> > q, r = divmod(7, 2)
->> > [round_quotient(q, r, 2, m) for m in ("half_up", "half_even", "down", "up", "floor", "ceil")]
+>>> import numpy as np
+>>> from moneta._rounding import round_quotient
+>>> q, r = divmod(7, 2)
+>>> [round_quotient(q, r, 2, m) for m in ("half_up", "half_even", "down", "up", "floor", "ceil")]
 [4, 4, 3, 4, 3, 4]
->> > q_arr, r_arr = np.divmod(np.array([5, -5, 7, -7]), 2)
->> > round_quotient(q_arr, r_arr, 2, "half_even").tolist()
+>>> q_arr, r_arr = np.divmod(np.array([5, -5, 7, -7]), 2)
+>>> round_quotient(q_arr, r_arr, 2, "half_even").tolist()
 [2, -2, 4, -4]
 ```
 

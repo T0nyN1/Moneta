@@ -2949,7 +2949,7 @@ moneta.fixed_array._MIN = -9223372036854775808  # -(1 << 63)
 **示例**
 
 ```python
->> > from moneta.fixed_array import _MAX, _MIN, _ON_EXCESS
+>>> from moneta.fixed_array import _MAX, _MIN, _ON_EXCESS
 >>> _ON_EXCESS, _MAX == (1 << 63) - 1, _MIN == -(1 << 63)
 (('raise', 'warn'), True, True)
 ```
@@ -3430,6 +3430,6 @@ FixedArray._format_scalar(m, scale)
 **示例**
 
 ```python
->> > FixedArray._format_scalar(150, 2), FixedArray._format_scalar(-5, 2), FixedArray._format_scalar(42, 0)
+>>> FixedArray._format_scalar(150, 2), FixedArray._format_scalar(-5, 2), FixedArray._format_scalar(42, 0)
 ('1.50', '-0.05', '42')
 ```

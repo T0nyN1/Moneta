@@ -9,24 +9,21 @@
 `object` 数组。
 
 ```python
->> > from moneta import UnitArray, Money, Price, Quantity
->> > m = Money(["100.50", "-20.25", "50.00"], "USD")
->> > isinstance(m, UnitArray)
+>>> from moneta import UnitArray, Money, Price, Quantity
+>>> m = Money(["100.50", "-20.25", "50.00"], "USD")
+>>> isinstance(m, UnitArray)
 True
->> > (-m).currency, abs(m).currency, m.sum().currency
+>>> (-m).currency, abs(m).currency, m.sum().currency
 (Currency(code='USD', digits=2, symbol='$', name='US Dollar'),
  Currency(code='USD', digits=2, symbol='$', name='US Dollar'),
  Currency(code='USD', digits=2, symbol='$', name='US Dollar'))
->> > m.sum()
+>>> m.sum()
 Money(FixedArray(130.25, scale=2), currency='USD')
->> > m == Money(["100.50", "-20.25", "50.00"], "CNY")  # 跨币种不相等且不报错
+>>> m == Money(["100.50", "-20.25", "50.00"], "CNY")  # 跨币种不相等且不报错
 False
->> > m < Money("200.00", "CNY")  # 跨币种比大小直接拦截
-Traceback(most
-recent
-call
-last):
-...
+>>> m < Money("200.00", "CNY")  # 跨币种比大小直接拦截
+Traceback (most recent call last):
+    ...
 TypeError: 币种不匹配: USD
 与
 CNY
@@ -155,92 +152,41 @@ class moneta.UnitArray(ABC)
 直接实例化抽象基类或未实现全部钩子的子类会被阻止：
 
 ```python
->> > from moneta import UnitArray
->> > UnitArray()
-Traceback(most
-recent
-call
-last):
+>>> from moneta import UnitArray
+>>> UnitArray()
+Traceback (most recent call last):
     ...
-TypeError: Can
-'t instantiate abstract class UnitArray ...
->> >
-
-class PartialUnit(UnitArray):
-
-
+TypeError: Can't instantiate abstract class UnitArray ...
+>>> class PartialUnit(UnitArray):  # 只实现了 _create_like
+...     def _create_like(self, new_data):
+...         return self
+>>> PartialUnit()
+Traceback (most recent call last):
     ...
-
-
-def _create_like(self, new_data):
-
-
-    ...
-return self
->> > PartialUnit()
-Traceback(most
-recent
-call
-last):
-...
-TypeError: Can
-'t instantiate abstract class PartialUnit ...
+TypeError: Can't instantiate abstract class PartialUnit ...
 ```
 
 只需实现两个抽象钩子即可定义完整的自定义带单位张量类：
 
 ```python
->> >
-
-class Length(UnitArray):
-
-
-    ...
-__slots__ = ("_unit",)
-...
-
-
-def __init__(self, values, unit="m"):
-
-
-    ...
-self._data = values if isinstance(values, FixedArray) else FixedArray(values)
-...
-self._unit = str(unit)
-...
-
-
-def _create_like(self, new_data):
-
-
-    ...
-return Length(new_data, self._unit)
-...
-
-
-def _check_compatible(self, other):
-
-
-    ...
-if not isinstance(other, Length):
-    ...
-raise TypeError(f"操作数必须是 Length，得到 {type(other).__name__}")
-...
-if other._unit != self._unit:
-    ...
-raise TypeError(f"单位不匹配: {self._unit} 与 {other._unit}")
-...
-
-
-def __repr__(self):
-
-
-    ...
-return f"Length({self._data!r}, unit={self._unit!r})"
->> > d = Length(["1.50", "-2.25", "3.00"], "km")
->> > d.sum()
+>>> class Length(UnitArray):
+...     __slots__ = ("_unit",)
+...     def __init__(self, values, unit="m"):
+...         self._data = values if isinstance(values, FixedArray) else FixedArray(values)
+...         self._unit = str(unit)
+...     def _create_like(self, new_data):
+...         return Length(new_data, self._unit)
+...     def _check_compatible(self, other):
+...         if not isinstance(other, Length):
+...             raise TypeError(f"操作数必须是 Length，得到 {type(other).__name__}")
+...         if other._unit != self._unit:
+...             raise TypeError(f"单位不匹配: {self._unit} 与 {other._unit}")
+...     def __repr__(self):
+...         return f"Length({self._data!r}, unit={self._unit!r})"
+>>> d = Length(["1.50", "-2.25", "3.00"], "km")
+>>> d.sum()
 Length(FixedArray(2.25, scale=2), unit='km')
->> > abs(d[1])
+>>> abs(d[1])
 Length(FixedArray(2.25, scale=2), unit='km')
 ```
 
@@ -339,24 +285,18 @@ UnitArray._check_compatible(other)
 **示例**
 
 ```python
->> > from moneta import Money, Quantity
->> > m_usd = Money("10.00", "USD")
->> > m_usd._check_compatible(Money("20.00", "USD"))  # 兼容：返回 None
->> > m_usd._check_compatible(Money("20.00", "CNY"))
-Traceback(most
-recent
-call
-last):
-...
+>>> from moneta import Money, Quantity
+>>> m_usd = Money("10.00", "USD")
+>>> m_usd._check_compatible(Money("20.00", "USD"))  # 兼容：返回 None
+>>> m_usd._check_compatible(Money("20.00", "CNY"))
+Traceback (most recent call last):
+    ...
 TypeError: 币种不匹配: USD
 与
 CNY
->> > m_usd._check_compatible(Quantity(10, "share"))
-Traceback(most
-recent
-call
-last):
-...
+>>> m_usd._check_compatible(Quantity(10, "share"))
+Traceback (most recent call last):
+    ...
 TypeError: 操作数必须是
 Money，得到
 Quantity
@@ -1541,14 +1481,11 @@ UnitArray._as_factor(other, what)
 **示例**
 
 ```python
->> > UnitArray._as_factor(1.5, "乘数")
+>>> UnitArray._as_factor(1.5, "乘数")
 FixedArray(1.5, scale=1)
->> > UnitArray._as_factor("1.5", "乘数")
-Traceback(most
-recent
-call
-last):
-...
+>>> UnitArray._as_factor("1.5", "乘数")
+Traceback (most recent call last):
+    ...
 TypeError: 乘数只接受数值（int、float、Decimal、Fraction、FixedArray
 或数值数组），收到
 str
@@ -1615,10 +1552,10 @@ UnitArray._compatible_or_none(other)
 **示例**
 
 ```python
->> > a = Length("1", "m")
->> > a._compatible_or_none(Length("2", "m"))
+>>> a = Length("1", "m")
+>>> a._compatible_or_none(Length("2", "m"))
 True
->> > a._compatible_or_none(Length("2", "km")), a._compatible_or_none(1)
+>>> a._compatible_or_none(Length("2", "km")), a._compatible_or_none(1)
 (False, False)
 ```
 
@@ -1660,17 +1597,14 @@ return op(self._data, other._data)  # 单位兼容：委托底层 FixedArray 对
 **示例**
 
 ```python
->> > a = Length("1", "m")
->> > bool(a._ordered(Length("2", "m"), lambda x, y: x < y))
+>>> a = Length("1", "m")
+>>> bool(a._ordered(Length("2", "m"), lambda x, y: x < y))
 True
->> > a._ordered(10, lambda x, y: x < y)
+>>> a._ordered(10, lambda x, y: x < y)
 NotImplemented
->> > a._ordered(Length("2", "km"), lambda x, y: x < y)
-Traceback(most
-recent
-call
-last):
-...
+>>> a._ordered(Length("2", "km"), lambda x, y: x < y)
+Traceback (most recent call last):
+    ...
 TypeError: 单位不匹配: m
 与
 km
