@@ -78,8 +78,9 @@ $$v = \text{mantissa} \times 10^{-\text{scale}}$$
 `NotImplemented`，方法直接抛出 `TypeError`。
 
 **快慢双路径与底层引擎分层。** 所有运算均在原生 `int64` / `uint64` 内完成，不升级为 Python `object` 大整数，也不退化为
-`float`。舍入规则与进位裁决统一由 [`moneta._rounding`](_rounding.md) 提供，而多精度无溢出慢路径统一由 [
-`moneta._limbs`](_limbs.md)（二进制 Base $2^{21}$ 动态分块内核）提供：
+`float`。舍入规则与进位裁决统一由 [`moneta._rounding`](_rounding.md) 提供，多精度无溢出慢路径统一由 [
+`moneta._limbs`](_limbs.md)（二进制 Base $2^{21}$ 动态分块内核）提供，无溢出极值提取 [`max_abs`](_utils.md#max_abs)
+与告警栈定位 [`user_stacklevel`](_utils.md#user_stacklevel) 由 [`moneta._utils`](_utils.md) 提供：
 
 | 运算             | 快路径（绝大多数输入）                                                                               | 慢路径（最坏上界超出 `int64` 时自动切换）                                                                                                       |
 |------------------|------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -138,7 +139,7 @@ $$v = \text{mantissa} \times 10^{-\text{scale}}$$
 |                        | [`FixedArray._is_numeric_operand`](#fixedarray_is_numeric_operand)                                                                                                                                                                                                                                                                             | 校验对象是否属于合法的数值操作数白名单                                            |
 |                        | [`FixedArray._coerce`](#fixedarray_coerce)                                                                                                                                                                                                                                                                                                     | 将运算另一侧的操作数安全转换为 `FixedArray`                                       |
 |                        | [`FixedArray._quantize_precision`](#fixedarray_quantize_precision)                                                                                                                                                                                                                                                                             | 将精确输入尾数对齐到目标 `scale` 并按 `on_excess` 报错或告警舍入                  |
-|                        | [`_user_stacklevel`、`_ON_EXCESS`、`_MAX`、`_MIN`](#_user_stacklevel-与-_on_excess)                                                                                                                                                                                                                                                            | 告警栈帧跳转定位函数、合法 `on_excess` 选项与 `int64` 极值常量                    |
+|                        | [`_ON_EXCESS`、`_MAX`、`_MIN`](#_on_excess_max-与-_min)                                                                                                                                                                                                                                                                                        | 合法 `on_excess` 选项元组与 `int64` 上下界极值常量                                |
 |                        | [`FixedArray._check_scale`](#fixedarray_check_scale)                                                                                                                                                                                                                                                                                           | 校验 `scale` 是否为非负整数                                                       |
 |                        | [`FixedArray._as_int64`](#fixedarray_as_int64)                                                                                                                                                                                                                                                                                                 | 将整数标量或整数数组转换为 `int64` 数组并检查越界                                 |
 |                        | [`FixedArray._align_scales`](#fixedarray_align_scales)                                                                                                                                                                                                                                                                                         | 将两个 `FixedArray` 的 `scale` 对齐到较大值                                       |
@@ -153,7 +154,6 @@ $$v = \text{mantissa} \times 10^{-\text{scale}}$$
 |                        | [`FixedArray._round_float_to_scale`](#fixedarray_round_float_to_scale)                                                                                                                                                                                                                                                                         | 将浮点数组的最短十进制写法按 `half_up` 快速舍入到指定 `scale`                     |
 |                        | [`FixedArray._parse_text_array`](#fixedarray_parse_text_array)                                                                                                                                                                                                                                                                                 | 去重解析字符串、`Decimal`、`Fraction` 或混合对象数组并返回掩码                    |
 | **底层数学与舍入内核** | [`FixedArray._check_division`](#fixedarray_check_division)                                                                                                                                                                                                                                                                                     | 校验非缺失位置的除数非零及 `-2**63 / -1` 溢出边界                                 |
-|                        | [`FixedArray._max_abs`](#fixedarray_max_abs)                                                                                                                                                                                                                                                                                                   | 安全计算 `int64` 数组绝对值的最大值（`-2**63` 不溢出）                            |
 |                        | [`FixedArray._mul_pow10`](#fixedarray_mul_pow10) / [`_mul_pow10_float`](#fixedarray_mul_pow10)                                                                                                                                                                                                                                                 | 带前置越界检查的 `x · 10^k` 整数放大与防溢出两步浮点放大                          |
 |                        | [`FixedArray._divmod_round`](#fixedarray_divmod_round)                                                                                                                                                                                                                                                                                         | 纯 `int64` 整数带余除法与精确舍入                                                 |
 |                        | [`FixedArray._doubling_step_10r`](#fixedarray_doubling_step_10r)                                                                                                                                                                                                                                                                               | 大除数无溢出二进制倍增单步长除（计算 `(10r) // d` 与 `(10r) % d`）                |
@@ -251,7 +251,7 @@ class moneta.PrecisionLossWarning(UserWarning)
   1. 输入为 `float` 或浮点数组（近似值直接按最短写法 `half_up` 静默舍入，不受 `on_excess` 影响）；
   2. 超出 `scale` 的位上只有末尾的 `0`（如 `FixedArray("1.500", scale=2, on_excess="warn")`）；
   3. 超出位仅出现在缺失位置 `<NA>` 上。
-- **告警位置自动指向用户代码**：内部通过 [`_user_stacklevel()`](#_user_stacklevel-与-_on_excess) 动态计算 `stacklevel`
+- **告警位置自动指向用户代码**：内部通过 [`user_stacklevel()`](_utils.md#user_stacklevel) 动态计算 `stacklevel`
   ，自动跳过 `moneta` 包内部的调用帧，使告警无论从 `FixedArray`、`Money`、`Price`、`Quantity` 还是 `fillna`
   触发，都直接指向用户自己的调用行。可通过 `warnings.simplefilter("error", PrecisionLossWarning)` 将其升级为异常。
 
@@ -2893,7 +2893,7 @@ FixedArray._quantize_precision(m, s, scale, mask, on_excess)
   - 若 `np.any(lost)` 为 `False`（多出的位全是末尾 `0` 或全是缺失值），直接调用 `_round_div_pow10(m, 0, 1, k, "half_up")`
     无损缩小，不报错也不告警；
   - 若 `np.any(lost)` 为 `True`：当 `on_excess == "raise"` 时抛出 `ValueError(f"输入的小数位数 ({s}) 超出指定 scale ({scale})")`
-    ；当 `on_excess == "warn"` 时通过 [`_user_stacklevel()`](#_user_stacklevel-与-_on_excess) 发出 [
+    ；当 `on_excess == "warn"` 时通过 [`user_stacklevel()`](_utils.md#user_stacklevel) 发出 [
     `PrecisionLossWarning`](#precisionlosswarning) 后按 `half_up` 舍入。
 
 **参数**
@@ -2930,33 +2930,28 @@ ValueError: 输入的小数位数 (3) 超出指定 scale (2)
 **另请参阅**
 
 - [`PrecisionLossWarning`](#precisionlosswarning)
-- [`_user_stacklevel` 与 `_ON_EXCESS`](#_user_stacklevel-与-_on_excess)
+- [`user_stacklevel`](_utils.md#user_stacklevel)
+- [`_ON_EXCESS`、`_MAX` 与 `_MIN`](#_on_excess_max-与-_min)
 
-### `_user_stacklevel` 与 `_ON_EXCESS`
+### `_ON_EXCESS`、`_MAX` 与 `_MIN`
 
 ```python
 moneta.fixed_array._ON_EXCESS = ('raise', 'warn')
 moneta.fixed_array._MAX = 9223372036854775807   # (1 << 63) - 1
 moneta.fixed_array._MIN = -9223372036854775808  # -(1 << 63)
-moneta.fixed_array._user_stacklevel()
 ```
 
 - **`_ON_EXCESS`**：构造器 `on_excess` 参数允许的合法取值元组 `('raise', 'warn')`。
 - **`_MAX` / `_MIN`**：有符号 64 位整数（`int64`）的最大值 `2**63 - 1` 与最小值 `-2**63`，用于 [
   `_as_int64`](#fixedarray_as_int64)、[`_mul_pow10`](#fixedarray_mul_pow10)、[
   `_doubling_step_10r`](#fixedarray_doubling_step_10r) 及算术溢出边界判定。
-- **`_user_stacklevel()`**：从调用栈自底向上回溯（`sys._getframe`），跳过所有模块名以 `"moneta"` 开头的内部调用帧，返回指向用户业务代码的第一帧
-  `stacklevel`。确保无论是直接调用 `FixedArray(..., on_excess="warn")`、通过 `Money(...)` / `Price(...)` / `Quantity(...)`
-  构造，还是通过 `Money.fillna(...)` 填充缺失值，发出的 [`PrecisionLossWarning`](#precisionlosswarning) 都精准指向用户代码行。
 
 **示例**
 
 ```python
->>> from moneta.fixed_array import _MAX, _MIN, _ON_EXCESS, _user_stacklevel
+>> > from moneta.fixed_array import _MAX, _MIN, _ON_EXCESS
 >>> _ON_EXCESS, _MAX == (1 << 63) - 1, _MIN == -(1 << 63)
 (('raise', 'warn'), True, True)
->>> _user_stacklevel() >= 1
-True
 ```
 
 ### FixedArray._check_scale
@@ -3223,23 +3218,6 @@ OverflowError: -2**63 除以 -1 超出 int64 范围
 >>> FixedArray._check_division(np.array([1], dtype=np.int64), np.array([0], dtype=np.int64), mask=np.array([True]))
 ```
 
-### FixedArray._max_abs
-
-```python
-FixedArray._max_abs(x)
-```
-
-安全计算 `int64` 数组元素绝对值的最大值，返回 Python `int`（`-2**63` 不溢出，空数组返回 `0`）。
-
-**示例**
-
-```python
->>> FixedArray._max_abs(np.array([-2 ** 63, 100], dtype=np.int64)) == 2 ** 63
-True
->>> FixedArray._max_abs(np.array([], dtype=np.int64))
-0
-```
-
 ### `FixedArray._mul_pow10`
 
 ```python
@@ -3247,11 +3225,12 @@ FixedArray._mul_pow10(x, k)
 FixedArray._mul_pow10_float(x, scale)
 ```
 
-- **`_mul_pow10(x, k)`**：计算整数尾数 `x · 10^k`，预先通过 [`_max_abs`](#fixedarray_max_abs) 判断是否超出 `int64`
-  （全零数组支持任意大 `k`）；
+- **`_mul_pow10(x, k)`**：计算整数尾数 `x · 10^k`，预先通过 [`max_abs`](_utils.md#max_abs) 判断是否超出 `int64`（全零数组支持任意大
+  `k`）；
 - **`_mul_pow10_float(x, scale)`**：计算浮点数 `x · 10.0^scale`，当 `scale > 300` 时拆成
-  `x * 10.0**300 * 10.0**(scale - 300)` 两步相乘，避免 `10.0 ** scale` 本身在 IEEE 754 `float64` 中溢出为 `inf`
-  （从而支持极小次正规浮点数如 `5e-324` 放大到 `scale=330`）。
+  `x * 10.0**min(scale, 300) * 10.0**max(scale - 300, 0)` 两步相乘，避免 `10.0 ** scale` 本身因 Python `float` 幂运算溢出抛出
+  `OverflowError`（只拆分一次，适用于 `scale <= 600`；非零浮点数指定 `scale > 400` 时构造前已报溢出，从而支持极小次正规浮点数如
+  `5e-324` 放大到 `scale=330`）。
 
 **示例**
 

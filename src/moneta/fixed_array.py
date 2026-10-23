@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import sys
 import warnings
 from decimal import Decimal
 from fractions import Fraction
@@ -16,6 +15,7 @@ import numpy as np
 
 from ._limbs import limbs_matmul, limbs_mul, limbs_round_div_pow10, limbs_sum, limbs_to_int64
 from ._rounding import RoundingMode, check_rounding, decide_bump, round_quotient
+from ._utils import max_abs, user_stacklevel
 
 # int64 边界常量
 _MAX = (1 << 63) - 1
@@ -25,14 +25,6 @@ _ON_EXCESS = ("raise", "warn")
 
 class PrecisionLossWarning(UserWarning):
     """精确输入（str、Decimal、Fraction、FixedArray 等）超出目标精度、被舍入时发出的警告。"""
-
-
-def _user_stacklevel() -> int:
-    """告警指向的栈层级：跳过 moneta 包内部的调用帧，指向用户代码。"""
-    frame, level = sys._getframe(1), 1
-    while frame is not None and frame.f_globals.get("__name__", "").split(".")[0] == "moneta":
-        frame, level = frame.f_back, level + 1
-    return level
 
 
 class FixedArray:
@@ -330,7 +322,7 @@ class FixedArray:
             message = f"输入的小数位数 ({s}) 超出指定 scale ({scale})"
             if on_excess == "raise":
                 raise ValueError(message)
-            warnings.warn(f"{message}，已按 half_up 舍入", PrecisionLossWarning, stacklevel=_user_stacklevel())
+            warnings.warn(f"{message}，已按 half_up 舍入", PrecisionLossWarning, stacklevel=user_stacklevel())
         return FixedArray._round_div_pow10(m, 0, 1, k, "half_up")
 
     @staticmethod
@@ -486,7 +478,7 @@ class FixedArray:
         flat = arr.ravel()
         n = flat.size
         flat64 = flat.astype(np.float64, copy=False)
-        max_abs = float(np.abs(flat64).max()) if n else 0.0
+        top_abs = float(np.abs(flat64).max()) if n else 0.0
         mantissas = np.zeros(n, dtype=np.int64)
         scales = np.zeros(n, dtype=np.int64)
         recorded = np.zeros(n, dtype=bool)
@@ -496,7 +488,7 @@ class FixedArray:
         exact_limit = 2.0 ** (np.finfo(arr.dtype).nmant + 1)  # 超过后相邻 float 间距 ≥ 1，最短写法可能省略整数末位
         s = 0
         while s <= max_probe:
-            if target_scale is None and max_abs * 10.0 ** s > _MAX:  # 还有元素没通过，scale 至少是 s，最大的数必然溢出
+            if target_scale is None and top_abs * 10.0 ** s > _MAX:  # 还有元素没通过，scale 至少是 s，最大的数必然溢出
                 raise OverflowError(f"浮点数需要超过 {s - 1} 位小数，对齐后超出 int64 范围")
             values = flat if pending is None else flat[pending]
             values64 = flat64 if pending is None else flat64[pending]
@@ -668,16 +660,11 @@ class FixedArray:
             raise OverflowError("-2**63 除以 -1 超出 int64 范围")
 
     @staticmethod
-    def _max_abs(x: np.ndarray) -> int:
-        """绝对值的最大值（Python int，-2**63 也不溢出）；空数组安全返回 0。"""
-        return max(-int(x.min()), int(x.max())) if x.size else 0
-
-    @staticmethod
     def _mul_pow10(x: np.ndarray, k: int) -> np.ndarray:
         """x·10^k，先用上下界判断，可能越界就报 OverflowError。"""
         if k == 0:
             return x
-        top = FixedArray._max_abs(x)
+        top = max_abs(x)
         if top == 0:
             return np.zeros_like(x)
         if k > 18 or top > _MAX // 10 ** k:
@@ -765,7 +752,7 @@ class FixedArray:
         2. 除数极大 (|d| > MAX // 10)：普通 r * 10 会溢出，自动切换至无溢出二进制倍增内核 (10r = 8r + 2r)。
         """
         FixedArray._check_division(m, d)
-        d_top = FixedArray._max_abs(d)
+        d_top = max_abs(d)
         is_huge = d_top > _MAX // 10
 
         if not is_huge:
@@ -965,7 +952,7 @@ class FixedArray:
         shift = natural_scale - target_scale
 
         # 快速通道：若两者全局极值之积在安全范围内且无需额外放大，直接单指令乘法与除法舍入
-        if 0 <= shift <= 18 and self._max_abs(self._mantissa) * self._max_abs(other_fa._mantissa) <= _MAX:
+        if 0 <= shift <= 18 and max_abs(self._mantissa) * max_abs(other_fa._mantissa) <= _MAX:
             prod = np.multiply(self._mantissa, other_fa._mantissa)
             res_m = prod if shift == 0 else self._divmod_round(prod, 10 ** shift, mode=mode)
             return self._from_mantissa(res_m, target_scale, mask=out_mask)
@@ -1031,7 +1018,7 @@ class FixedArray:
         a, b = self._mantissa, other_fa._mantissa
         out_mask = self._matmul_mask(self._mask, other_fa._mask, a.shape, b.shape)
         terms = a.shape[-1] if a.ndim else 0
-        if self._max_abs(a) * self._max_abs(b) * terms <= _MAX:
+        if max_abs(a) * max_abs(b) * terms <= _MAX:
             result = np.matmul(a, b)  # 形状不合法时由 NumPy 报错
             raw_fa = self._from_mantissa(result, natural_scale, mask=out_mask)
             if target_scale == natural_scale:
@@ -1225,7 +1212,7 @@ class FixedArray:
 
         total = eff_m.sum(axis=axis, keepdims=keepdims)
         count = eff_m.size // max(np.size(total), 1)  # 每个结果单元格累加的元素个数
-        if self._max_abs(eff_m) * count <= _MAX:
+        if max_abs(eff_m) * count <= _MAX:
             res_m = total
         else:
             # 慢速保底路径：纯 int64 Base 2^21 分块累加判定真实求和，消除正负对冲假阳性误报
@@ -1335,7 +1322,7 @@ class FixedArray:
         elif shift < 0:
             res = self._round_div_pow10(q_tot, r_tot, count, -shift, mode)
         else:  # shift > 0
-            top = self._max_abs(q_tot)
+            top = max_abs(q_tot)
             if shift > 18 or (top and top > _MAX // 10 ** shift):
                 raise OverflowError(f"均值乘以 10^{shift} 后超出 int64 范围")
             q_base = q_tot * 10 ** shift
