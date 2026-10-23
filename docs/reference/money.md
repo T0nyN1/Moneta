@@ -1680,11 +1680,9 @@ Money._fused_round_step(floor, inexact, step, mode)
 ```python
 >> > m = Money("1.00", "USD")
 >> > step = m._as_step(FixedArray("0.10"))  # step.scale == 2, t = 3
->> >  # 真实值 v = 0.0499：在 scale=3 下 floor = 0.049，且 v > 0.049 (inexact=True)
->> > m._fused_round_step(FixedArray("0.049"), np.array(True), step, "half_up")
+>> > m._fused_round_step(FixedArray("0.049"), np.array(True), step, "half_up")  # v = 0.0499 > 0.049 (inexact=True)
 FixedArray(0.00, scale=2)
->> >  # 真实值 v = 0.0500：在 scale=3 下 floor = 0.050，且 v == 0.050 (inexact=False)
->> > m._fused_round_step(FixedArray("0.050"), np.array(False), step, "half_up")
+>> > m._fused_round_step(FixedArray("0.050"), np.array(False), step, "half_up")  # v = 0.0500 == 0.050 (inexact=False)
 FixedArray(0.10, scale=2)
 ```
 

@@ -18,11 +18,11 @@ from typing import Any, Optional, Union
 import numpy as np
 
 from ._rounding import check_rounding
+from ._units import WILDCARD_UNIT, check_unit, units_compatible
 from .fixed_array import FixedArray, RoundingMode
 from .unit_array import UnitArray
 
 _RATIO_EXTRA_DIGITS = 8  # 除法结果相对两侧 scale 额外保留的小数位数
-WILDCARD_UNIT = "Any"
 
 Rounding = Union[RoundingMode, str]
 
@@ -47,9 +47,9 @@ class Quantity(UnitArray):
     __slots__ = ("_unit",)
 
     def __init__(self, values: Any, unit: str = "share", scale: Optional[int] = None) -> None:
-        unit = self._check_unit(unit)
+        unit = check_unit(unit)
         if isinstance(values, Quantity):
-            if WILDCARD_UNIT not in (values._unit, unit) and values._unit != unit:
+            if not units_compatible(values._unit, unit):
                 raise TypeError(f"单位不匹配: {values._unit} 与 {unit}")
             data = values._data
         else:
@@ -71,7 +71,7 @@ class Quantity(UnitArray):
         """检查另一个对象是否是同单位或通配单位的 Quantity。"""
         if not isinstance(other, Quantity):
             raise TypeError(f"操作数必须是 Quantity，得到 {type(other).__name__}")
-        if WILDCARD_UNIT not in (self._unit, other._unit) and self._unit != other._unit:
+        if not units_compatible(self._unit, other._unit):
             raise TypeError(f"单位不匹配: {self._unit} 与 {other._unit}")
 
     def _resolve_unit(self, other: "Quantity") -> str:

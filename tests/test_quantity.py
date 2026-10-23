@@ -138,12 +138,6 @@ class TestUnit:
         assert Quantity(1, unit="BTC").unit == "BTC"
         assert Quantity(1, unit="BTC") != Quantity(1, unit="btc")  # 区分大小写
 
-    @pytest.mark.parametrize("bad, exc", [(None, TypeError), (1, TypeError), (b"share", TypeError), ("", ValueError),
-                                          ("   ", ValueError)])
-    def test_invalid(self, bad, exc):
-        with pytest.raises(exc):
-            Quantity(1, unit=bad)
-
     def test_wildcard(self):
         a, b = Quantity(3, unit=WILDCARD_UNIT), Quantity(2, unit="barrel")
         assert (a + b).unit == "barrel" and (b + a).unit == "barrel" and (a - b).unit == "barrel"

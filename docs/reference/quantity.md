@@ -55,9 +55,8 @@ Money(FixedArray(1895.00, scale=2), currency='USD')
 
 ### 单位规则与通配单位 `"Any"`
 
-- **大小写敏感的非空字符串**：`unit` 在构造时自动去除首尾空白（[
-  `UnitArray._check_unit`](unit_array.md#unitarray_check_unit)），不能为空字符串，且严格区分大小写（例如 `"BTC"` 与 `"btc"`
-  是两个不同的单位）。默认单位为 `"share"`。
+- **大小写敏感的非空字符串**：`unit` 在构造时自动去除首尾空白（[`check_unit`](_units.md#check_unit)），不能为空字符串，且严格区分大小写（例如
+  `"BTC"` 与 `"btc"` 是两个不同的单位）。默认单位为 `"share"`。
 - **通配单位 [`WILDCARD_UNIT = "Any"`](#wildcard_unit)**：
     - 当两个 `Quantity` 进行加减、比率除法或比较（`==`、`!=`、`<`、`<=`、`>`、`>=`）时，只要其中一方的单位为 `"Any"`，即视为量纲兼容；
     - 加减运算后的结果单位通过 [`_resolve_unit`](#quantity_resolve_unit) 优先收敛为 **非 `"Any"` 的具体单位**（例如
@@ -86,8 +85,7 @@ Money(FixedArray(1895.00, scale=2), currency='USD')
 |                        | [`Quantity.to_pandas`](#quantityto_pandas)                                                                 | 导出为 `pandas.Series` / `DataFrame` 并自动注入 `attrs["unit"]`                              |
 |                        | [`Quantity.to_polars`、`to_float`、`to_decimal`](#quantityto_polarsquantityto_float-与-quantityto_decimal) | 导出为 `polars.Series`、`float64` 或 `Decimal`                                               |
 |                        | [`str(q)`、`repr(q)`](#strq-与-reprq文本表示)                                                              | 带单位的简明文本与完整构造表达式展示                                                         |
-| **内部钩子与私有 API** | [`UnitArray._check_unit`](unit_array.md#unitarray_check_unit)                                              | 校验并去除首尾空白的单位字符串规范化函数                                                     |
-|                        | [`Quantity._create_like`](#quantity_create_like)                                                           | `UnitArray` 钩子：用新 `FixedArray` 与可选新单位构造 `Quantity`                              |
+| **内部钩子与私有 API** | [`Quantity._create_like`](#quantity_create_like)                                                           | `UnitArray` 钩子：用新 `FixedArray` 与可选新单位构造 `Quantity`                              |
 |                        | [`Quantity._check_compatible`](#quantity_check_compatible)                                                 | `UnitArray` 钩子：校验另一对象是否为同单位或 `"Any"` 的 `Quantity`                           |
 |                        | [`Quantity._resolve_unit`](#quantity_resolve_unit)                                                         | 合并两个兼容 `Quantity` 的单位（优先取非 `"Any"` 的具体单位）                                |
 |                        | [`_RATIO_EXTRA_DIGITS`](#_ratio_extra_digits)                                                              | 除法未指定 `scale` 时相对两侧最大 `scale` 额外保留的小数位数（`8`）                          |
@@ -130,8 +128,8 @@ class moneta.Quantity(values, unit="share", scale=None)
 
 **机制说明**
 
-1. 先调用 [`_check_unit(unit)`](unit_array.md#unitarray_check_unit) 校验 `isinstance(unit, str)` 并执行 `.strip()`；
-2. 若 `values` 是 `Quantity`：检查 `WILDCARD_UNIT not in (values._unit, unit) and values._unit != unit`，不兼容则抛
+1. 先调用 [`check_unit(unit)`](_units.md#check_unit) 校验 `isinstance(unit, str)` 并执行 `.strip()`；
+2. 若 `values` 是 `Quantity`：调用 [`units_compatible(values._unit, unit)`](_units.md#units_compatible) 校验单位兼容，不兼容则抛
    `TypeError`，兼容则取 `data = values._data`（可将 `"Any"` 数量窄化为具体单位）；否则取 `data = values`；
 3. 直接调用 `self._data = FixedArray(data, scale=scale, on_excess="warn")`：指定 `scale` 时浮点数静默舍入，精确输入丢精度时由
    `FixedArray` 发出 [`PrecisionLossWarning`](fixed_array.md#precisionlosswarning) 后按 `half_up` 舍入。
@@ -193,8 +191,9 @@ TypeError: 单位不匹配: barrel 与 share
 moneta.quantity.WILDCARD_UNIT = "Any"
 ```
 
-通配单位字符串常量 `"Any"`。携带 `"Any"` 单位的 `Quantity` 可以与任意具体单位的 `Quantity` 进行加减、除法和比较，也可与任意
-`base_unit` 的 [`Price`](price.md) 相乘；在二元加减运算中，结果单位会自动收敛为另一方的具体单位。
+通配单位字符串常量 `"Any"`（定义于 [`moneta._units.WILDCARD_UNIT`](_units.md#wildcard_unit) 并由 `moneta.quantity`
+重导出）。携带 `"Any"` 单位的 `Quantity` 可以与任意具体单位的 `Quantity` 进行加减、除法和比较，也可与任意 `base_unit` 的 [
+`Price`](price.md) 相乘；在二元加减运算中，结果单位会自动收敛为另一方的具体单位。
 
 **示例**
 
@@ -213,6 +212,7 @@ Money(FixedArray(240.00, scale=2), currency='USD')
 
 **另请参阅**
 
+- [`moneta._units.WILDCARD_UNIT`](_units.md#wildcard_unit)
 - [`Quantity._check_compatible`](#quantity_check_compatible)
 - [`Quantity._resolve_unit`](#quantity_resolve_unit)
 
@@ -243,7 +243,7 @@ False
 
 **另请参阅**
 
-- [`UnitArray._check_unit`](unit_array.md#unitarray_check_unit)
+- [`check_unit`](_units.md#check_unit)
 - [`WILDCARD_UNIT`](#wildcard_unit)
 
 ### 继承自 UnitArray 的数组属性
@@ -906,8 +906,9 @@ Quantity(FixedArray(5, scale=0), unit='share')
 Quantity._check_compatible(other)
 ```
 
-实现 [`UnitArray._check_compatible`](unit_array.md#unitarray_check_compatible) 抽象钩子：校验 `other` 是否为相同单位或通配单位
-`"Any"` 的 `Quantity`。
+实现 [`UnitArray._check_compatible`](unit_array.md#unitarray_check_compatible) 抽象钩子：通过 [
+`units_compatible(self._unit, other._unit)`](_units.md#units_compatible) 校验 `other` 是否为相同单位或通配单位 `"Any"` 的
+`Quantity`。
 
 **参数**
 

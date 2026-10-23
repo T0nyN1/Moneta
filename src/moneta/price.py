@@ -20,20 +20,17 @@ from typing import Any, Optional, Union
 import numpy as np
 
 from ._rounding import check_rounding
+from ._units import WILDCARD_UNIT, check_unit, units_compatible
 from .currency import Currency, get_currency
 from .fixed_array import FixedArray, RoundingMode
 from .money import Money
-from .quantity import WILDCARD_UNIT, Quantity
+from .quantity import Quantity
 from .unit_array import UnitArray
 
 _RATIO_EXTRA_DIGITS = 8  # 除法结果相对两侧 scale 额外保留的小数位数
 _KEEP = object()  # _create_like 的哨兵：沿用原来的 tick
 
 Rounding = Union[RoundingMode, str]
-
-
-def _units_compatible(a: str, b: str) -> bool:
-    return a == b or WILDCARD_UNIT in (a, b)
 
 
 class Price(UnitArray):
@@ -63,12 +60,12 @@ class Price(UnitArray):
     def __init__(self, values: Any, quote_currency: Union[Currency, str], base_unit: str = "share",
                  tick_size: Optional[Any] = None, scale: Optional[int] = None, ) -> None:
         currency = get_currency(quote_currency)
-        unit = self._check_unit(base_unit)
+        unit = check_unit(base_unit)
         tick = None if tick_size is None else self._as_tick(tick_size)
         if tick is not None and tick.ndim:
             raise ValueError("tick_size 必须是标量；逐元素的价格网格请用 round_to_step(step=...) 显式传入")
         if isinstance(values, Price):
-            if values._quote_currency != currency or not _units_compatible(values._base_unit, unit):
+            if values._quote_currency != currency or not units_compatible(values._base_unit, unit):
                 raise TypeError(f"价格量纲不匹配: {values._quote_currency.code}/{values._base_unit} "
                                 f"vs {currency.code}/{unit}")
             data = values._data
@@ -104,7 +101,7 @@ class Price(UnitArray):
         """检查另一个对象是否是同计价货币、同单位（或通配单位）的 Price。"""
         if not isinstance(other, Price):
             raise TypeError(f"操作数必须是 Price，得到 {type(other).__name__}")
-        if self._quote_currency != other._quote_currency or not _units_compatible(self._base_unit, other._base_unit):
+        if self._quote_currency != other._quote_currency or not units_compatible(self._base_unit, other._base_unit):
             raise TypeError(
                 f"价格量纲不匹配: {self._quote_currency.code}/{self._base_unit} "
                 f"vs {other._quote_currency.code}/{other._base_unit}"
@@ -187,7 +184,7 @@ class Price(UnitArray):
         if isinstance(other, Quantity):
             if scale is not None:
                 raise ValueError("结果为 Money 时精度固定为币种精度，不能指定 scale")
-            if not _units_compatible(other.unit, self._base_unit):
+            if not units_compatible(other.unit, self._base_unit):
                 raise TypeError(f"标的单位不匹配: 数量单位 '{other.unit}' 与标价基准单位 '{self._base_unit}' 不一致")
             total = self._data.mul_round(other.data, scale=self._quote_currency.digits, rounding=mode)
             return Money._wrap(total, self._quote_currency)

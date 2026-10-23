@@ -32,13 +32,13 @@ Price(FixedArray(10.25, scale=2), quote_currency='USD', base_unit='share')
 
 - **`quote_currency`**：计价货币（[`Currency`](currency.md) 单例，构造时通过 [`get_currency`](currency.md#get_currency)
   解析）；
-- **`base_unit`**：计价标的基准单位（区分大小写的非空字符串，默认 `"share"`，通过 [
-  `UnitArray._check_unit`](unit_array.md#unitarray_check_unit) 去除首尾空白）。
+- **`base_unit`**：计价标的基准单位（区分大小写的非空字符串，默认 `"share"`，通过 [`check_unit`](_units.md#check_unit)
+  去除首尾空白）。
 
-**通配单位 `"Any"`（[`WILDCARD_UNIT`](quantity.md#wildcard_unit)）双向兼容规则：**
+**通配单位 `"Any"`（[`WILDCARD_UNIT`](_units.md#wildcard_unit)）双向兼容规则：**
 
 1. **两个 `Price` 之间（加减、比率除法、比较）**：当且仅当 `quote_currency` 相同，且 `base_unit` 相同或任一方为 `"Any"`（见 [
-   `_units_compatible`](#_units_compatible)）时视为量纲兼容。加减运算后的 `base_unit` 通过 [
+   `units_compatible`](_units.md#units_compatible)）时视为量纲兼容。加减运算后的 `base_unit` 通过 [
    `_resolve_unit`](#price_resolve_unit) 自动收敛为非 `"Any"` 的具体单位。
 2. **`Price` 与 `Quantity` 相乘（计算成交金额）**：只要 `price.base_unit == qty.unit`，或其中任一方为 `"Any"`，即可相乘消去标的单位，得到以
    `price.quote_currency` 计价的 [`Money`](money.md)。
@@ -94,8 +94,7 @@ Price(FixedArray(10.25, scale=2), quote_currency='USD', base_unit='share')
 |                        | [`Price.to_pandas`](#priceto_pandas)                                                                                                                 | 导出为 `pandas.Series` / `DataFrame` 并自动注入 `quote_currency` 与 `base_unit`           |
 |                        | [`Price.to_polars`、`to_float`、`to_decimal`](#priceto_polarspriceto_float-与-priceto_decimal)                                                       | 导出为 `polars.Series`、`float64` 或 `Decimal`                                            |
 |                        | [`str(p)`、`repr(p)`](#strp-与-reprp文本表示)                                                                                                        | `"数值 币种/单位"` 简明文本与完整构造表达式展示                                           |
-| **内部钩子与私有 API** | [`_units_compatible`](#_units_compatible)                                                                                                            | 判断两个单位字符串是否相等或含通配单位 `"Any"`                                            |
-|                        | [`Price._as_tick`](#price_as_tick)                                                                                                                   | 校验 `tick_size` / `step` 在数值白名单内且严格为正数                                      |
+| **内部钩子与私有 API** | [`Price._as_tick`](#price_as_tick)                                                                                                                   | 校验 `tick_size` / `step` 在数值白名单内且严格为正数                                      |
 |                        | [`Price._create_like`](#price_create_like)                                                                                                           | `UnitArray` 钩子：用新 `FixedArray` 与可选单位/`tick_size` 零拷贝构造 `Price`             |
 |                        | [`Price._check_compatible`](#price_check_compatible)                                                                                                 | `UnitArray` 钩子：校验另一对象是否为同币种、兼容单位的 `Price`                            |
 |                        | [`Price._resolve_unit`](#price_resolve_unit)                                                                                                         | 合并两个兼容单位（优先取非 `"Any"` 的具体单位）                                           |
@@ -145,12 +144,11 @@ class moneta.Price(values, quote_currency, base_unit="share", tick_size=None, sc
 
 **机制说明**
 
-1. 依次通过 `get_currency(quote_currency)`、`self._check_unit(base_unit)` 与 `self._as_tick(tick_size)`
-   解析并校验计价币种、基准单位与正数标量
-   `tick_size`；
-2. 若 `values` 已是 `Price`：校验 `values._quote_currency == currency` 且 `_units_compatible(values._base_unit, unit)`
-   ，否则抛 `TypeError`；取 `data = values._data`，且若本次未显式传入 `tick_size` 则自动继承 `values._tick_size`；否则取
-   `data = values`；
+1. 依次通过 [`get_currency(quote_currency)`](currency.md#get_currency)、[`check_unit(base_unit)`](_units.md#check_unit)
+   与 [`self._as_tick(tick_size)`](#price_as_tick) 解析并校验计价币种、基准单位与正数标量 `tick_size`；
+2. 若 `values` 已是 `Price`：校验 `values._quote_currency == currency` 且 [
+   `units_compatible(values._base_unit, unit)`](_units.md#units_compatible)，否则抛 `TypeError`；取 `data = values._data`
+   ，且若本次未显式传入 `tick_size` 则自动继承 `values._tick_size`；否则取 `data = values`；
 3. 直接调用 `self._data = FixedArray(data, scale=scale, on_excess="warn")`：指定 `scale` 时浮点数静默舍入，精确输入丢精度时由
    `FixedArray` 发出 [`PrecisionLossWarning`](fixed_array.md#precisionlosswarning) 后按 `half_up` 舍入。
 
@@ -777,23 +775,6 @@ repr(p)
 
 ## 内部钩子与辅助函数（私有 API）
 
-### _units_compatible
-
-```python
-moneta.price._units_compatible(a, b)
-```
-
-判断两个单位字符串 `a` 与 `b` 是否兼容：当 `a == b` 或 `"Any"`（[`WILDCARD_UNIT`](quantity.md#wildcard_unit)）在 `(a, b)`
-中时返回 `True`，否则返回 `False`。
-
-**示例**
-
-```python
->>> from moneta.price import _units_compatible
->>> _units_compatible("share", "share"), _units_compatible("Any", "barrel"), _units_compatible("share", "barrel")
-(True, True, False)
-```
-
 ### Price._as_tick
 
 ```python
@@ -867,7 +848,7 @@ Price._check_compatible(other)
 ```
 
 实现 [`UnitArray._check_compatible`](unit_array.md#unitarray_check_compatible) 抽象钩子：校验 `other` 是否为相同
-`quote_currency` 且 `base_unit` 兼容（含 `"Any"`）的 `Price`。
+`quote_currency` 且 `base_unit` 满足 [`units_compatible`](_units.md#units_compatible)（含 `"Any"`）的 `Price`。
 
 **示例**
 
