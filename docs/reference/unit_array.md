@@ -119,7 +119,6 @@ CNY
 |                          | [`UnitArray.__array__` 与 NumPy 防护机制](#unitarrayarray-与-numpy-防护机制)                                                                                                                                                                                                                                                  | 拦截隐式转 `ndarray` 与 `ufunc`，白名单分派 `__array_function__`     |
 | **内部辅助（私有 API）** | [`UnitArray._as_factor`](#unitarray_as_factor)                                                                                                                                                                                                                                                                                | 校验无量纲数值白名单并转为 `FixedArray`                              |
 |                          | [`UnitArray._as_grid`](#unitarray_as_grid-与-unitarray_fill_value) / [`UnitArray._fill_value`](#unitarray_as_grid-与-unitarray_fill_value)                                                                                                                                                                                    | 校验不含缺失值的网格参数 / 将 `fillna` 数值填充值换算为 `FixedArray` |
-|                          | [`UnitArray._check_unit`](#unitarray_check_unit)                                                                                                                                                                                                                                                                              | 校验单位字符串非空并去除首尾空白                                     |
 |                          | [`UnitArray._compatible_or_none`](#unitarray_compatible_or_none)                                                                                                                                                                                                                                                              | 捕获 `_check_compatible` 异常并转为布尔返回值（供 `==` / `!=` 使用） |
 |                          | [`UnitArray._ordered`](#unitarray_ordered)                                                                                                                                                                                                                                                                                    | 校验有序比较的操作数类型与量纲兼容性并分发比较函数                   |
 
@@ -288,13 +287,13 @@ UnitArray._create_like(new_data)
 **示例**
 
 ```python
->> > from moneta import Money, Price, Quantity
->> > m = Money(["10.00", "20.00"], "USD")
->> > m._create_like(FixedArray(["5.50", "6.25"]))
+>>> from moneta import Money, Price, Quantity
+>>> m = Money(["10.00", "20.00"], "USD")
+>>> m._create_like(FixedArray(["5.50", "6.25"]))
 Money(FixedArray([5.50, 6.25], scale=2), currency='USD')
->> > p = Price("100.00", "USD", base_unit="barrel", tick_size=FixedArray("0.05"))
->> > p2 = p._create_like(FixedArray("101.25"))
->> > (p2.quote_currency.code, p2.base_unit, p2.tick_size)
+>>> p = Price("100.00", "USD", base_unit="barrel", tick_size=FixedArray("0.05"))
+>>> p2 = p._create_like(FixedArray("101.25"))
+>>> (p2.quote_currency.code, p2.base_unit, p2.tick_size)
 ('USD', 'barrel', FixedArray(0.05, scale=2))
 ```
 
@@ -611,8 +610,8 @@ UnitArray.T
 **示例**
 
 ```python
->> > a = Length(["1", "2", "3", "4"], "km").reshape(2, 2)
->> > a.T
+>>> a = Length(["1", "2", "3", "4"], "km").reshape(2, 2)
+>>> a.T
 Length(FixedArray([[1, 3],
                    [2, 4]], scale=0), unit='km')
 ```
@@ -744,20 +743,15 @@ Money(FixedArray([10.50, 20.00], scale=2), currency='USD')
 **示例**
 
 ```python
->> > a = Length(["-1.5", "2.0"], "km")
->> > (+a) is a
+>>> a = Length(["-1.5", "2.0"], "km")
+>>> (+a) is a
 True
->> > -a
+>>> -a
 Length(FixedArray([1.5, -2.0], scale=1), unit='km')
->> > -Length(FixedArray._from_mantissa(np.array([-(2 ** 63)]), 0), "km")
-Traceback(most
-recent
-call
-last):
-...
-OverflowError: 取负导致数值超出
-int64
-范围
+>>> -Length(FixedArray._from_mantissa(np.array([-(2 ** 63)]), 0), "km")
+Traceback (most recent call last):
+    ...
+OverflowError: 取负导致数值超出 int64 范围
 ```
 
 **性能对比**
@@ -800,20 +794,13 @@ Python 内置的 `abs(a)`。
 **示例**
 
 ```python
->> > a = Length(["-1.5", "2.0"], "km")
->> > abs(a)
+>>> a = Length(["-1.5", "2.0"], "km")
+>>> abs(a)
 Length(FixedArray([1.5, 2.0], scale=1), unit='km')
->> > np.abs(a)
-Traceback(most
-recent
-call
-last):
-...
-TypeError: operand
-'Length'
-does
-not support
-ufuncs(__array_ufunc__=None)
+>>> np.abs(a)
+Traceback (most recent call last):
+    ...
+TypeError: operand 'Length' does not support ufuncs (__array_ufunc__=None)
 ```
 
 **性能对比**
@@ -868,19 +855,19 @@ UnitArray.sum(axis=None, keepdims=False, skipna=True, out=None, dtype=None)
 **示例**
 
 ```python
->> > a = Length([["1.5", "2"], ["3", "4.25"]], "km")
->> > a.sum()
+>>> a = Length([["1.5", "2"], ["3", "4.25"]], "km")
+>>> a.sum()
 Length(FixedArray(10.75, scale=2), unit='km')
->> > a.sum(axis=0)
+>>> a.sum(axis=0)
 Length(FixedArray([4.50, 6.25], scale=2), unit='km')
->> > a.sum(axis=1, keepdims=True)
+>>> a.sum(axis=1, keepdims=True)
 Length(FixedArray([[3.50],
                    [7.25]], scale=2), unit='km')
->> > np.sum(a)  # np.sum 自动转发并保留单位
+>>> np.sum(a)  # np.sum 自动转发并保留单位
 Length(FixedArray(10.75, scale=2), unit='km')
->> > m_na = Money(["1.50", None, "2.50"], "USD")
->> > m_na.sum(), m_na.sum(skipna=False)
-(Money(FixedArray(4.00, scale=2), currency='USD'), Money(FixedArray( < NA >, scale=2), currency='USD'))
+>>> m_na = Money(["1.50", None, "2.50"], "USD")
+>>> m_na.sum(), m_na.sum(skipna=False)
+(Money(FixedArray(4.00, scale=2), currency='USD'), Money(FixedArray(<NA>, scale=2), currency='USD'))
 ```
 
 中间和超过 `int64` 上限但正负相抵后未越界时仍能精确求和：
@@ -1081,12 +1068,10 @@ a >= b
 **示例**
 
 ```python
->> > a, b = Length(["1", "2"], "m"), Length(["2", "1"], "m")
->> > a < b
-array([True, False])
->> > a >= b
-array([False, True])
->> > min(Length("3", "m"), Length("2", "m"))
+>>> a, b = Length(["1", "2"], "m"), Length(["2", "1"], "m")
+>>> (a < b).tolist(), (a >= b).tolist()
+([True, False], [False, True])
+>>> min(Length("3", "m"), Length("2", "m"))
 Length(FixedArray(2, scale=0), unit='m')
 ```
 
@@ -1147,11 +1132,11 @@ UnitArray.reshape(*shape)
 **示例**
 
 ```python
->> > a = Length(["1", "2", "3", "4"], "km").reshape(2, 2)
->> > a
+>>> a = Length(["1", "2", "3", "4"], "km").reshape(2, 2)
+>>> a
 Length(FixedArray([[1, 2],
                    [3, 4]], scale=0), unit='km')
->> > a.reshape(-1)
+>>> a.reshape(-1)
 Length(FixedArray([1, 2, 3, 4], scale=0), unit='km')
 ```
 
@@ -1184,8 +1169,8 @@ UnitArray.transpose(*axes)
 **示例**
 
 ```python
->> > a = Length(["1", "2", "3", "4", "5", "6"], "km").reshape(2, 3)
->> > a.transpose(1, 0)
+>>> a = Length(["1", "2", "3", "4", "5", "6"], "km").reshape(2, 3)
+>>> a.transpose(1, 0)
 Length(FixedArray([[1, 4],
                    [2, 5],
                    [3, 6]], scale=0), unit='km')
@@ -1245,12 +1230,12 @@ a[key]
 **示例**
 
 ```python
->> > a = Length(["10", "20", "30"], "km")
->> > a[1]  # 单元素索引返回 0 维同单位对象
+>>> a = Length(["10", "20", "30"], "km")
+>>> a[1]  # 单元素索引返回 0 维同单位对象
 Length(FixedArray(20, scale=0), unit='km')
->> > a[1:]
+>>> a[1:]
 Length(FixedArray([20, 30], scale=0), unit='km')
->> > a[a > Length("15", "km")]  # 布尔掩码过滤
+>>> a[a > Length("15", "km")]  # 布尔掩码过滤
 Length(FixedArray([20, 30], scale=0), unit='km')
 ```
 
@@ -1290,12 +1275,12 @@ iter(a)
 **示例**
 
 ```python
->> > mat = Length([["1", "2"], ["3", "4"]], "km")
->> > len(mat)
+>>> mat = Length([["1", "2"], ["3", "4"]], "km")
+>>> len(mat)
 2
->> > list(mat)
+>>> list(mat)
 [Length(FixedArray([1, 2], scale=0), unit='km'), Length(FixedArray([3, 4], scale=0), unit='km')]
->> > bool(Length("0", "km")), bool(Length("0.5", "km"))
+>>> bool(Length("0", "km")), bool(Length("0.5", "km"))
 (False, True)
 ```
 
@@ -1513,7 +1498,7 @@ TypeError: operand 'Length' does not support ufuncs (__array_ufunc__=None)
 Traceback (most recent call last):
     ...
 TypeError: operand 'Length' does not support ufuncs (__array_ufunc__=None)
->> > np.array_equal(a, Length(["1.0", "2.0"], "m"))
+>>> np.array_equal(a, Length(["1.0", "2.0"], "m"))
 True
 ```
 
@@ -1604,60 +1589,6 @@ Traceback (most recent call last):
     ...
 ValueError: 步长不能是缺失值
 ```
-
-### UnitArray._check_unit
-
-```python
-@staticmethod
-UnitArray._check_unit(unit)
-```
-
-校验标的单位或量纲标签是否为非空字符串，并返回去除首尾空白后的字符串。
-
-**参数**
-
-- **unit** : *Any* — 待校验的单位名称。
-
-**返回值**
-
-- **out** : *str* — 去除首尾空白后的非空字符串。
-
-**异常**
-
-- **TypeError** — `not isinstance(unit, str)`。
-- **ValueError** — `unit.strip()` 为空字符串 `""`。
-
-**机制说明**
-
-供 [`Price`](price.md) 与 [`Quantity`](quantity.md) 构造器统一校验 `base_unit` / `unit` 参数。
-
-**示例**
-
-```python
->> > UnitArray._check_unit("  barrel ")
-'barrel'
->> > UnitArray._check_unit("   ")
-Traceback(most
-recent
-call
-last):
-...
-ValueError: 单位不能为空
->> > UnitArray._check_unit(123)
-Traceback(most
-recent
-call
-last):
-...
-TypeError: 单位必须是
-str，收到
-int
-```
-
-**另请参阅**
-
-- [`Price`](price.md#pricevalues-quote_currency-base_unitshare-tick_sizenone-scalenone)
-- [`Quantity`](quantity.md#quantityvalues-unitshare-scalenone)
 
 ### UnitArray._compatible_or_none
 

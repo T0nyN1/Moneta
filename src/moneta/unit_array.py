@@ -67,15 +67,6 @@ class UnitArray(ABC):
         """fillna 的数值填充值 → FixedArray；Money 等有固定精度的子类覆盖它，按自己的构造规则换算。"""
         return self._as_factor(value, "填充值")
 
-    @staticmethod
-    def _check_unit(unit: Any) -> str:
-        """单位必须是非空 str，去掉首尾空白后返回。"""
-        if not isinstance(unit, str):
-            raise TypeError(f"单位必须是 str，收到 {type(unit).__name__}")
-        unit = unit.strip()
-        if not unit:
-            raise ValueError("单位不能为空")
-        return unit
 
     # ---------- 底层数据与数组属性 ----------
 
