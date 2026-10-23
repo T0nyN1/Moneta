@@ -720,11 +720,16 @@ class TestIntegerHelpers:
         assert F._check_scale(0) == 0 and F._check_scale(np.int8(3)) == 3
         assert type(F._check_scale(np.int64(3))) is int
 
-    def test_max_abs(self):
-        assert F._max_abs(np.array([MIN, 5])) == 2 ** 63
-        assert F._max_abs(np.array([-3, 7])) == 7
-        assert F._max_abs(np.array([], dtype=np.int64)) == 0
-        assert F._max_abs(np.int64(-4)) == 4
+    @pytest.mark.parametrize("x, scale", [(1.5, 2), (-0.125, 0), (3.0, 22), (1e-300, 300)])
+    def test_mul_pow10_float_small_scale_is_single_multiplication(self, x, scale):
+        assert F._mul_pow10_float(x, scale) == x * 10.0 ** scale
+
+    def test_mul_pow10_float_large_scale(self):
+        assert F._mul_pow10_float(0.0, 350) == 0.0 and F._mul_pow10_float(0.0, 600) == 0.0  # 只拆一次：上限约 600
+        assert np.isclose(F._mul_pow10_float(1.0, 305), 1e305)
+        assert np.isclose(F._mul_pow10_float(5e-324, 330), 5e6, rtol=0.02)  # 次正规数：分两步乘
+        assert F._mul_pow10_float(1e-10, 400) == float("inf")  # 结果本身越界时得到 inf，而不是异常
+        assert F._mul_pow10_float(np.array([1.5, -2.0]), 2).tolist() == [150.0, -200.0]
 
     def test_mul_pow10(self):
         x = np.array([1, -2], dtype=np.int64)
