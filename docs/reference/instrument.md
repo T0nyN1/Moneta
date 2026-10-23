@@ -34,10 +34,9 @@ Money(FixedArray(240750.00, scale=2), currency='USD')
 - **`symbol`**：资产代码。必须为 `str`，构造时自动去除首尾空白并转为大写（`symbol.strip().upper()`），去除空白后不能为空字符串。
 - **`quote_currency`**：计价与结算货币（必填，无默认币种）。通过 [`get_currency`](currency.md#get_currency) 解析为 [
   `Currency`](currency.md) 实例。
-- **`base_unit`**：报价与持仓的基准单位（默认 `"share"`）。通过 [
-  `UnitArray._check_unit`](unit_array.md#unitarray_check_unit) 去除首尾空白并校验非空，且 **严禁使用通配单位 `"Any"`**（[
-  `WILDCARD_UNIT`](quantity.md#wildcard_unit)）——具体金融合约必须绑定明确的物理或合约单位（如 `"share"`、`"barrel"`、
-  `"contract"`、`"BTC"`）。
+- **`base_unit`**：报价与持仓的基准单位（默认 `"share"`）。通过 [`check_unit`](_units.md#check_unit) 去除首尾空白并校验非空，且
+  **严禁使用通配单位 `"Any"`**（[`WILDCARD_UNIT`](_units.md#wildcard_unit)）——具体金融合约必须绑定明确的物理或合约单位（如
+  `"share"`、`"barrel"`、`"contract"`、`"BTC"`）。
 - **`multiplier` 与 `tick_size`**：合约乘数（每 1 个 `base_unit` 对应的标的数量，默认 `1`）与最小变动价位（默认 `None`
   表示不限制）。均通过 [`Instrument._positive_scalar`](#instrument_positive_scalar) 校验：必须属于数值白名单（拒绝 `str`、
   `bool` 及带单位对象）、为 **0 维非缺失正数标量**，并完整保留输入自身的十进制精度 `scale`（不会静默取整）。
@@ -115,7 +114,7 @@ class moneta.Instrument(symbol, quote_currency, base_unit="share", multiplier=1,
 - **quote_currency** : *Currency 或 str* — 计价/结算货币（如 `"USD"`、`CNY`），通过 [
   `get_currency`](currency.md#get_currency) 解析。
 - **base_unit** : *str，默认 `"share"`* — 报价与持仓的基准单位（如 `"share"`、`"barrel"`、`"contract"`
-  ）。自动去除首尾空白，不能为空，且不能是通配单位 `"Any"`（[`WILDCARD_UNIT`](quantity.md#wildcard_unit)）。
+  ）。自动去除首尾空白，不能为空，且不能是通配单位 `"Any"`（[`WILDCARD_UNIT`](_units.md#wildcard_unit)）。
 - **multiplier** : *int, float, Decimal, Fraction 或 FixedArray，默认 `1`* — 合约乘数（每 1 个 `base_unit`
   对应的标的数量）。必须为数值白名单内的 0 维非缺失正数标量，不接受字符串或布尔值。
 - **tick_size** : *int, float, Decimal, Fraction, FixedArray 或 None，默认 `None`* — 最小变动价位（如 `Decimal("0.01")`
@@ -143,8 +142,8 @@ class moneta.Instrument(symbol, quote_currency, base_unit="share", multiplier=1,
 构造器内部依次执行以下校验与绑定：
 
 1. 检查 `isinstance(symbol, str)`，计算 `code = symbol.strip().upper()` 并校验非空；
-2. 调用 [`UnitArray._check_unit(base_unit)`](unit_array.md#unitarray_check_unit) 规范化单位字符串，并检查
-   `unit == WILDCARD_UNIT`（若为 `"Any"` 则抛出 `ValueError`）；
+2. 调用 [`check_unit(base_unit)`](_units.md#check_unit) 规范化单位字符串，并检查 `unit == WILDCARD_UNIT`（若为 `"Any"` 则抛出
+   `ValueError`）；
 3. 校验 `name` 与 `asset_class` 均为 `str`；
 4. 通过 `object.__setattr__` 依次写入 `_symbol`、`get_currency(quote_currency)`、`_base_unit`、[
    `_positive_scalar(multiplier, "multiplier")`](#instrument_positive_scalar)、`_tick_size`、`name.strip() or code` 以及
@@ -443,7 +442,8 @@ Instrument.as_price(values, scale=None)
 
 1. **当 `isinstance(values, Price)` 时**：
     - 校验 `values.quote_currency == self._quote_currency`，否则抛出 `TypeError`；
-    - 校验 `values.base_unit in (self._base_unit, WILDCARD_UNIT)`，否则抛出 `TypeError`；
+   - 调用 [`units_compatible(values.base_unit, self._base_unit)`](_units.md#units_compatible) 校验单位兼容，否则抛出
+     `TypeError`；
     - 若 `scale is None`， **直接原样返回 `values`**（零拷贝透传，保留 `values` 原有的 `base_unit` 与 `tick_size`）；否则调用
       `Price(values, self._quote_currency, values.base_unit, scale=scale)` 调整精度。
 2. **当 `values` 不是 `Price` 时**：
@@ -522,8 +522,8 @@ $$\text{Notional} = \text{price} \times \text{quantity} \times \text{multiplier}
 **机制说明**
 
 1. 调用 `p = self.as_price(price)` 解析并校验价格；
-2. 若 `quantity` 已是 `Quantity` 则直接使用，否则调用 `self.as_quantity(quantity)`，随后校验
-   `q.unit in (self._base_unit, WILDCARD_UNIT)`；
+2. 若 `quantity` 已是 `Quantity` 则直接使用，否则调用 `self.as_quantity(quantity)`，随后通过 [
+   `units_compatible(q.unit, self._base_unit)`](_units.md#units_compatible) 校验单位兼容；
 3. 调用 [`exact = p.data.mul_round(q.data, rounding=None)`](fixed_array.md#fixedarraymul_round)
    精确计算 $\text{price} \times \text{quantity}$（`scale = p.scale + q.scale`，无任何中间舍入）；
 4. 调用 `total = exact.mul_round(self._multiplier, scale=self._quote_currency.digits, rounding=rounding)`
@@ -651,7 +651,7 @@ pickle.dumps(inst) / pickle.loads(data)
 >>> copy.copy(inst) is inst and copy.deepcopy(inst) is inst
 True
 >>> restored = pickle.loads(pickle.dumps(inst))
->>> restored == inst and repr(restored) == repr(inst) and restored.tick_size == inst.tick_size
+>> > restored == inst and repr(restored) == repr(inst) and bool(restored.tick_size == inst.tick_size)
 True
 ```
 

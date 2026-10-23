@@ -16,11 +16,12 @@ from __future__ import annotations
 
 from typing import Any, Optional, Tuple, Union
 
+from ._units import WILDCARD_UNIT, check_unit, units_compatible
 from .currency import Currency, get_currency
 from .fixed_array import FixedArray, RoundingMode
 from .money import Money
 from .price import Price
-from .quantity import WILDCARD_UNIT, Quantity
+from .quantity import Quantity
 from .unit_array import UnitArray
 
 Rounding = Union[RoundingMode, str]
@@ -64,7 +65,7 @@ class Instrument:
         code = symbol.strip().upper()
         if not code:
             raise ValueError("标的代码不能为空")
-        unit = UnitArray._check_unit(base_unit)
+        unit = check_unit(base_unit)
         if unit == WILDCARD_UNIT:
             raise ValueError(f"标的的基准单位必须是具体单位，不能是通配单位 '{WILDCARD_UNIT}'")
         for label, value in (("name", name), ("asset_class", asset_class)):
@@ -139,7 +140,7 @@ class Instrument:
             if values.quote_currency != self._quote_currency:
                 raise TypeError(f"价格计价货币 {values.quote_currency.code} 与标的 {self._symbol} 的计价货币 "
                                 f"{self._quote_currency.code} 不一致")
-            if values.base_unit not in (self._base_unit, WILDCARD_UNIT):
+            if not units_compatible(values.base_unit, self._base_unit):
                 raise TypeError(
                     f"价格单位 '{values.base_unit}' 与标的 {self._symbol} 的基准单位 '{self._base_unit}' 不一致")
             return values if scale is None else Price(values, self._quote_currency, values.base_unit, scale=scale)
@@ -153,7 +154,7 @@ class Instrument:
         """
         p = self.as_price(price)
         q = quantity if isinstance(quantity, Quantity) else self.as_quantity(quantity)
-        if q.unit not in (self._base_unit, WILDCARD_UNIT):
+        if not units_compatible(q.unit, self._base_unit):
             raise TypeError(f"数量单位 '{q.unit}' 与标的 {self._symbol} 的基准单位 '{self._base_unit}' 不一致")
         exact = p.data.mul_round(q.data, rounding=None)  # 价格 × 数量精确相乘，只在乘以合约乘数时舍入一次
         total = exact.mul_round(self._multiplier, scale=self._quote_currency.digits, rounding=rounding)

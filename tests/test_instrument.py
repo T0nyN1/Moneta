@@ -62,13 +62,10 @@ class TestConstruct:
         with pytest.raises(KeyError, match="未注册"):
             Instrument("AAPL", "XYZ")
 
-    def test_base_unit_validation(self):
-        with pytest.raises(ValueError, match="单位不能为空"):
-            aapl(base_unit="  ")
-        with pytest.raises(TypeError, match="单位必须是 str"):
-            aapl(base_unit=None)
+    def test_base_unit_cannot_be_wildcard(self):  # 一般的单位校验见 test_units
         with pytest.raises(ValueError, match="通配单位"):
             aapl(base_unit="Any")
+        assert aapl(base_unit="any").base_unit == "any"  # 只有精确的 "Any" 是通配单位
 
     @pytest.mark.parametrize("field", ["multiplier", "tick_size"])
     def test_positive_scalar_fields(self, field):
