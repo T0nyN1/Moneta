@@ -186,7 +186,7 @@ class TestValuation:
         assert lot.profit_loss("110") == usd(100) and lot.pnl("110") == usd(100)
         assert PositionLot.pnl is PositionLot.profit_loss
         rate = lot.return_rate(Price("110", "USD"))
-        assert isinstance(rate, F) and rate == F("0.1") and rate.scale == 10
+        assert isinstance(rate, F) and rate == F("0.1") and rate.scale == 2  # 整除：去掉末尾的 0
 
     def test_multiplier(self):
         lot = PositionLot(CL, Quantity(2, unit="barrel"), "2024-01-02", cost=usd(160000))

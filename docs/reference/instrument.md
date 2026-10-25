@@ -48,7 +48,7 @@ Money(FixedArray(240750.00, scale=2), currency='USD')
 
 ### 身份标识语义（相等性与哈希仅看代码与计价货币）
 
-在投资组合（`Portfolio`）与持仓批次（[`PositionLot`](lot.md)）管理中，`Instrument` 充当非现金资产的 **唯一身份键（Identity Key）**
+在投资组合（[`Portfolio`](portfolio.md)）与持仓批次（[`PositionLot`](lot.md)）管理中，`Instrument` 充当非现金资产的 **唯一身份键（Identity Key）**
 。同一标的代码在同一计价货币下代表同一交易品种，而全称、乘数或 `tick_size` 属于合约参考数据（Reference Data）：
 
 | 操作                                     | 行为与语义                                                                                                                                                                                    |

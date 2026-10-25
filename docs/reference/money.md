@@ -54,9 +54,9 @@ $$\text{m.scale} \equiv \text{m.currency.digits}, \qquad \text{真实金额} = \
 | `m.multiply(k, rounding, step)`                 | 无量纲数值                     | `Money`                        | 按 `rounding` 舍入到 `currency.digits`；给出 `step` 时**一次性**舍入到步长网格   |
 | `m @ w`、`w @ m`、`m.matmul(w, rounding)`       | 无量纲权重                     | `Money`                        | 矩阵内积后按 `rounding`（运算符默认 `half_up`）一次性舍入到 `currency.digits`    |
 | `m / k`、`m.divide(k, rounding, step)`          | 无量纲数值                     | `Money`                        | 按 `rounding` 舍入到 `currency.digits` 或步长网格（不可指定 `scale`）            |
-| `m1 / m2`、`m1.divide(m2, rounding, scale)`     | 同币种 `Money`                 | [`FixedArray`](fixed_array.md) | 量纲相消为无量纲比率，默认保留 `currency.digits + 8` 位小数，可通过 `scale` 指定 |
-| `m / price`、`m.divide(price, rounding, scale)` | 同计价币种 [`Price`](price.md) | [`Quantity`](quantity.md)      | 金额除以单价得数量，默认保留 `currency.digits + 8` 位小数，可通过 `scale` 指定   |
-| `m / qty`、`m.divide(qty, rounding, scale)`     | [`Quantity`](quantity.md)      | [`Price`](price.md)            | 金额除以数量得单价，默认保留 `currency.digits + 8` 位小数，可通过 `scale` 指定   |
+| `m1 / m2`、`m1.divide(m2, rounding, scale)`     | 同币种 `Money`                 | [`FixedArray`](fixed_array.md) | 量纲相消为无量纲比率，默认按 [`FixedArray.divide`](fixed_array.md#fixedarraydivide) 保留 `max(scale) + 8` 位并去末尾 0，可用 `scale` 指定 |
+| `m / price`、`m.divide(price, rounding, scale)` | 同计价币种 [`Price`](price.md) | [`Quantity`](quantity.md)      | 金额除以单价得数量，默认按 [`FixedArray.divide`](fixed_array.md#fixedarraydivide) 保留 `max(scale) + 8` 位并去末尾 0，可用 `scale` 指定   |
+| `m / qty`、`m.divide(qty, rounding, scale)`     | [`Quantity`](quantity.md)      | [`Price`](price.md)            | 金额除以数量得单价，默认按 [`FixedArray.divide`](fixed_array.md#fixedarraydivide) 保留 `max(scale) + 8` 位并去末尾 0，可用 `scale` 指定   |
 | `m.mean(axis, keepdims, rounding, skipna)`      | —                              | `Money`                        | 沿轴求算术均值（默认忽略 `<NA>`），按 `rounding` 舍入到 `currency.digits`        |
 | `m.round_to_step(step, rounding)`               | 正数步长                       | `Money`                        | 对齐到步长网格（`step` 精度不得超过 `currency.digits`）                          |
 | `divmod(m1, m2)`                                | 同币种 `Money`                 | `(int \| ndarray, Money)`      | 向下整除求可拆出的整数份数与剩余 `Money` 零头                                    |
@@ -113,7 +113,6 @@ $$\text{m.scale} \equiv \text{m.currency.digits}, \qquad \text{真实金额} = \
 |                        | [`Money._fill_value`](#money_fill_value)                                                       | `UnitArray` 钩子：将 `fillna` 数值填充值按 `Money` 构造规则换算到币种精度                 |
 |                        | [`Money._as_step`](#money_as_step)                                                             | 校验正数步长且精度不超过币种精度                                                          |
 |                        | [`Money._fused_round_step`](#money_fused_round_step)                                           | 由 `step.scale + 1` 精度的下界与非精确标志一次性舍入到步长网格                            |
-|                        | [`_RATIO_EXTRA_DIGITS`](#_ratio_extra_digits)                                                  | 除法结果非 `Money` 时相对币种精度默认额外保留的小数位数（`8`）                            |
 
 ## 构造、工厂方法与核心属性
 
@@ -646,9 +645,7 @@ m / other
 
 **返回值**
 
-- **out** : *Money、FixedArray、Quantity 或 Price* — 当结果为 `Money` 时，`scale` 为 `currency.digits`；当结果为
-  `FixedArray`、[`Quantity`](quantity.md) 或 [`Price`](price.md) 时，默认保留 `currency.digits + 8` 位小数（如 `USD` 为
-  `10` 位，`JPY` 为 `8` 位）。
+- **out** : *Money、FixedArray、Quantity 或 Price* — 当结果为 `Money` 时，`scale` 固定为 `currency.digits`；当结果为 `FixedArray`、[`Quantity`](quantity.md) 或 [`Price`](price.md) 时，遵循 [`FixedArray.divide`](fixed_array.md#fixedarraydivide) 的默认精度规则：先保留 `max(两侧 scale) + 8` 位小数（商放不下 `int64` 时少保留几位），再去掉末尾多余的 `0`（至少保留 `max(两侧 scale)` 位）。
 
 **异常**
 
@@ -666,12 +663,12 @@ m / other
 >>> from moneta import Money, Price, Quantity
 >>> Money("10.00", "USD") / 3  # Money / 无量纲数 -> Money (scale=2)
 Money(FixedArray(3.33, scale=2), currency='USD')
->>> Money("1.00", "USD") / Money("3.00", "USD")  # Money / Money -> FixedArray (scale = 2 + 8 = 10)
+>>> Money("1.00", "USD") / Money("3.00", "USD")  # 除不尽：保留 2 + 8 = 10 位小数
 FixedArray(0.3333333333, scale=10)
->>> Money("1895.00", "USD") / Price("189.50", "USD", base_unit="share")  # Money / Price -> Quantity
-Quantity(FixedArray(10.0000000000, scale=10), unit='share')
->>> Money("100.00", "USD") / Quantity(4, unit="barrel")  # Money / Quantity -> Price
-Price(FixedArray(25.0000000000, scale=10), quote_currency='USD', base_unit='barrel')
+>>> Money("1895.00", "USD") / Price("189.50", "USD", base_unit="share")  # 整除：去末尾 0，至少保留 max(2, 2) = 2 位
+Quantity(FixedArray(10.00, scale=2), unit='share')
+>>> Money("100.00", "USD") / Quantity(4, unit="barrel")  # 整除：去末尾 0，至少保留 max(2, 0) = 2 位
+Price(FixedArray(25.00, scale=2), quote_currency='USD', base_unit='barrel')
 ```
 
 **性能对比**
@@ -701,8 +698,7 @@ Money.divide(other, rounding="half_up", step=None, scale=None)
 - **other** : *数值 array_like、Money、Price 或 Quantity* — 除数。
 - **rounding** : *RoundingMode 或 str，默认 `"half_up"`* — 舍入模式。
 - **step** : *数值 array_like，可选* — 仅当 `other` 为无量纲数值（结果为 `Money`）时可用：将商一次性舍入到该正数步长网格。
-- **scale** : *int，可选* — 仅当 `other` 为 `Money`、[`Price`](price.md) 或 [`Quantity`](quantity.md)（结果不是 `Money`
-  ）时可用：指定返回的比率、数量或单价的小数位数；默认 `None` 时取 `self.currency.digits + 8`。
+- **scale** : *int，可选* — 仅当 `other` 为 `Money`、[`Price`](price.md) 或 [`Quantity`](quantity.md)（结果不是 `Money`）时可用：指定返回的比率、数量或单价的小数位数；默认 `None` 时交由 [`FixedArray.divide`](fixed_array.md#fixedarraydivide) 自动确定（`max(两侧 scale) + 8` 位，放不下 `int64` 时少保留，最后去掉末尾 `0`）。
 
 **返回值**
 
@@ -717,10 +713,7 @@ Money.divide(other, rounding="half_up", step=None, scale=None)
 
 **机制说明**
 
-1. **量纲消去分支（`other` 为 `Money` / [`Price`](price.md) / [`Quantity`](quantity.md)）**：校验 `step is None`，计算目标精度
-   `target = self._currency.digits + 8 if scale is None else FixedArray._check_scale(scale)`，调用
-   `self._data.divide(other._data, scale=target, rounding=mode)` 并封装为 `FixedArray`、[`Quantity`](quantity.md) 或 [
-   `Price`](price.md)。
+1. **量纲消去分支（`other` 为 `Money` / [`Price`](price.md) / [`Quantity`](quantity.md)）**：校验 `step is None`，令 `target = None if scale is None else FixedArray._check_scale(scale)`，直接调用 [`self._data.divide(other._data, scale=target, rounding=mode)`](fixed_array.md#fixedarraydivide) 并封装为 `FixedArray`、[`Quantity`](quantity.md) 或 [`Price`](price.md)。
 2. **无量纲缩放分支（`other` 为数值）**：校验 `scale is None`。若 `step is None` 则直接调用
    `self._data.divide(divisor, scale=self._currency.digits, rounding=mode)`；若给出了 `step`，则在 `t = step_fa.scale + 1`
    精度上求 `"floor"` 与 `"ceil"` 并通过 [`_fused_round_step`](#money_fused_round_step) 一次性舍入到步长网格。
@@ -757,7 +750,7 @@ ValueError: step 只适用于结果为 Money 的除法
 
 - [`m / other`](#m--other真除法运算符)
 - [`Money.multiply`](#moneymultiply)
-- [`_RATIO_EXTRA_DIGITS`](#_ratio_extra_digits)
+- [`FixedArray.divide`](fixed_array.md#fixedarraydivide)
 
 ### m @ other、other @ m 与 Money.matmul（矩阵内积）
 
@@ -1688,25 +1681,3 @@ FixedArray(0.10, scale=2)
 - [`Money.multiply`](#moneymultiply)
 - [`Money.divide`](#moneydivide)
 - [`decide_bump`](_rounding.md#decide_bump)
-
-### _RATIO_EXTRA_DIGITS
-
-```python
-moneta.money._RATIO_EXTRA_DIGITS = 8
-```
-
-模块级整数常量（值为 `8`）：当 [`Money.divide`](#moneydivide) 或 [`m / other`](#m--other真除法运算符) 的结果不是 `Money`（即
-`Money / Money -> FixedArray`、`Money / Price -> Quantity`、`Money / Quantity -> Price`）且未显式传入 `scale` 时，默认保留的小数位数为
-`self.currency.digits + _RATIO_EXTRA_DIGITS`（例如 `USD` 默认保留 `2 + 8 = 10` 位，`JPY` 默认保留 `0 + 8 = 8` 位）。
-
-**示例**
-
-```python
->>> from moneta.money import _RATIO_EXTRA_DIGITS
->>> _RATIO_EXTRA_DIGITS
-8
-```
-
-**另请参阅**
-
-- [`Money.divide`](#moneydivide)

@@ -61,11 +61,11 @@ $$v = \text{mantissa} \times 10^{-\text{scale}}$$
 | `a + b`、`a - b`、`a % b`                             | `max(a.scale, b.scale)`                                                           | 精确                      |
 | `+a`、`-a`、`abs(a)`、`a.sum(axis, keepdims, skipna)` | `a.scale`                                                                         | 精确                      |
 | `a * b`、`a @ b`                                      | `a.scale + b.scale`                                                               | 精确                      |
-| `a / b`                                               | `max(a.scale, b.scale)`                                                           | `half_up`                 |
-| `a // b`                                              | `0`（返回 `scale=0` 的 `FixedArray`，传播 `mask`）                                | 向下取整                  |
-| `a.mul_round(b, scale, rounding)`                     | `scale`，默认 `max(a.scale, b.scale)`（`rounding=None` 时为 `a.scale + b.scale`） | 按 `rounding`，只舍入一次 |
-| `a.matmul(b, scale, rounding)`                        | `scale`，默认 `max(a.scale, b.scale)`（`rounding=None` 时为 `a.scale + b.scale`） | 按 `rounding`，只舍入一次 |
-| `a.divide(b, scale, rounding)`                        | `scale`，默认 `max(a.scale, b.scale)`                                             | 按 `rounding`             |
+| `a / b`                                               | 默认 `max(a.scale, b.scale) + 8`（放不下 `int64` 时少保留，最后去末尾 0，至少保留 `max` 位） | `half_up`                 |
+| `a // b`                                              | `0`（返回 `scale=0` 的 `FixedArray`，传播 `mask`）                                           | 向下取整                  |
+| `a.mul_round(b, scale, rounding)`                     | `scale`，默认 `max(a.scale, b.scale)`（`rounding=None` 时为 `a.scale + b.scale`）            | 按 `rounding`，只舍入一次 |
+| `a.matmul(b, scale, rounding)`                        | `scale`，默认 `max(a.scale, b.scale)`（`rounding=None` 时为 `a.scale + b.scale`）            | 按 `rounding`，只舍入一次 |
+| `a.divide(b, scale, rounding)`                        | `scale`；默认 `None` 时同 `a / b` 的自动精度规则                                             | 按 `rounding`             |
 | `a.mean(axis, keepdims, scale, rounding, skipna)`     | `scale`，默认 `a.scale`                                                           | 按 `rounding`             |
 | `a.rescale(new_scale, rounding)`                      | `new_scale`                                                                       | 缩小时按 `rounding`       |
 | `a.round_to_step(step, rounding)`                     | `max(a.scale, step.scale)`                                                        | 按 `rounding`             |
@@ -96,6 +96,7 @@ $$v = \text{mantissa} \times 10^{-\text{scale}}$$
 |------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------|
 | **舍入模式与警告**     | [`RoundingMode`](#roundingmode)                                                                                                                                                                                                                                                                                                                | 六种金融与会计舍入模式枚举                                                        |
 |                        | [`PrecisionLossWarning`](#precisionlosswarning)                                                                                                                                                                                                                                                                                                | 精确输入超出目标 `scale` 并被舍入时发出的警告                                     |
+|                        | [`DIVISION_EXTRA_DIGITS`](#_on_excessdivision_extra_digits_log10_max_max-与-_min)                                                                                                                                                                                                                                                              | 不指定 `scale` 的除法在 `max(两侧 scale)` 之外最多额外保留的小数位数（`8`）       |
 | **构造与属性**         | [`FixedArray(values, scale=None, mask=None, on_excess="raise")`](#fixedarrayvalues-scalenone-masknone-on_excessraise)                                                                                                                                                                                                                          | 从数值、字符串、`Decimal`、`Fraction`、数组构造                                   |
 |                        | [`FixedArray.mantissa`](#fixedarraymantissa)                                                                                                                                                                                                                                                                                                   | 只读 `int64` 尾数数组视图                                                         |
 |                        | [`FixedArray.scale`](#fixedarrayscale)                                                                                                                                                                                                                                                                                                         | 全局十进制小数位数                                                                |
@@ -110,8 +111,8 @@ $$v = \text{mantissa} \times 10^{-\text{scale}}$$
 |                        | [`a + b`、`a - b`](#a--b-与-a---b加减法)                                                                                                                                                                                                                                                                                                       | 逐元素加减法，自动对齐 scale                                                      |
 |                        | [`a * b`](#a--b精确乘法)                                                                                                                                                                                                                                                                                                                       | 逐元素精确乘法（scale 相加）                                                      |
 |                        | [`FixedArray.mul_round`](#fixedarraymul_round)                                                                                                                                                                                                                                                                                                 | 融合乘法 + 一次舍入                                                               |
-|                        | [`a / b`](#a--b真除法)                                                                                                                                                                                                                                                                                                                         | 逐元素真除法（默认保留 `max(scale)` 位并 `half_up`）                              |
-|                        | [`FixedArray.divide`](#fixedarraydivide)                                                                                                                                                                                                                                                                                                       | 指定目标 scale 与舍入模式的精确除法                                               |
+|                        | [`a / b`](#a--b真除法)                                                                                                                                                                                                                                                                                                                         | 逐元素真除法（默认保留 `max(scale) + 8` 位并去末尾 0，`half_up` 舍入）            |
+|                        | [`FixedArray.divide`](#fixedarraydivide)                                                                                                                                                                                                                                                                                                       | 支持自动或指定目标 `scale` 与舍入模式的精确除法                                   |
 |                        | [`a // b`、`a % b`、`divmod(a, b)`](#a--ba--b-与-divmoda-b整除与取余)                                                                                                                                                                                                                                                                          | 向下整除（返回 `scale=0` 的 `FixedArray`）、取余与带余除法                        |
 | **矩阵运算**           | [`a @ b`](#a--b精确矩阵乘法)                                                                                                                                                                                                                                                                                                                   | 精确矩阵乘法（scale 相加）                                                        |
 |                        | [`FixedArray.matmul`](#fixedarraymatmul)                                                                                                                                                                                                                                                                                                       | 矩阵乘法 + 一次舍入                                                               |
@@ -139,7 +140,7 @@ $$v = \text{mantissa} \times 10^{-\text{scale}}$$
 |                        | [`FixedArray._is_numeric_operand`](#fixedarray_is_numeric_operand)                                                                                                                                                                                                                                                                             | 校验对象是否属于合法的数值操作数白名单                                            |
 |                        | [`FixedArray._coerce`](#fixedarray_coerce)                                                                                                                                                                                                                                                                                                     | 将运算另一侧的操作数安全转换为 `FixedArray`                                       |
 |                        | [`FixedArray._quantize_precision`](#fixedarray_quantize_precision)                                                                                                                                                                                                                                                                             | 将精确输入尾数对齐到目标 `scale` 并按 `on_excess` 报错或告警舍入                  |
-|                        | [`_ON_EXCESS`、`_MAX`、`_MIN`](#_on_excess_max-与-_min)                                                                                                                                                                                                                                                                                        | 合法 `on_excess` 选项元组与 `int64` 上下界极值常量                                |
+|                        | [`_ON_EXCESS`、`DIVISION_EXTRA_DIGITS`、`_LOG10_MAX`、`_MAX`、`_MIN`](#_on_excessdivision_extra_digits_log10_max_max-与-_min)                                                                                                                                                                                                                  | 合法 `on_excess` 选项、默认除法额外保留位数（`8`）与 `int64` 极值常量             |
 |                        | [`FixedArray._check_scale`](#fixedarray_check_scale)                                                                                                                                                                                                                                                                                           | 校验 `scale` 是否为非负整数                                                       |
 |                        | [`FixedArray._as_int64`](#fixedarray_as_int64)                                                                                                                                                                                                                                                                                                 | 将整数标量或整数数组转换为 `int64` 数组并检查越界                                 |
 |                        | [`FixedArray._align_scales`](#fixedarray_align_scales)                                                                                                                                                                                                                                                                                         | 将两个 `FixedArray` 的 `scale` 对齐到较大值                                       |
@@ -159,6 +160,8 @@ $$v = \text{mantissa} \times 10^{-\text{scale}}$$
 |                        | [`FixedArray._doubling_step_10r`](#fixedarray_doubling_step_10r)                                                                                                                                                                                                                                                                               | 大除数无溢出二进制倍增单步长除（计算 `(10r) // d` 与 `(10r) % d`）                |
 |                        | [`FixedArray._chunked_divmod_round`](#fixedarray_chunked_divmod_round)                                                                                                                                                                                                                                                                         | 分段十进制长除法与舍入 `round(m · 10^k / d)`                                      |
 |                        | [`FixedArray._round_div_pow10`](#fixedarray_round_div_pow10)                                                                                                                                                                                                                                                                                   | 将带余商 `(q + r/d)` 除以 `10^k` 并精确舍入（支持任意 `k ≥ 0`）                   |
+|                        | [`FixedArray._auto_division_scale`](#fixedarray_auto_division_scale)                                                                                                                                                                                                                                                                           | 不指定 `scale` 时自动确定商的小数位数（`max + 8`，放不下 `int64` 时自适应缩减）   |
+|                        | [`FixedArray._squeeze_scale`](#fixedarray_squeeze_scale)                                                                                                                                                                                                                                                                                       | 去掉全体元素共同的末尾 `0`（至少保留 `min_scale` 位小数）                         |
 |                        | [`FixedArray._limbs_to_mantissa`](#fixedarray_limbs_to_mantissa)                                                                                                                                                                                                                                                                               | 将 [`_limbs`](_limbs.md) 多精度分块结果按目标 `shift` 舍入收口为 `int64`          |
 |                        | [`moneta._rounding`](_rounding.md) / [`moneta._limbs`](_limbs.md)                                                                                                                                                                                                                                                                              | 独立拆分的统一舍入裁决引擎与 Base $2^{21}$ 多精度分块整数算术模块                 |
 | **内部比较与格式化**   | [`FixedArray._compare_fixed_array`](#fixedarray_compare_fixed_arrayfixedarray_compare-与-fixedarray_eq_unrepresentable) / [`_compare`](#fixedarray_compare_fixed_arrayfixedarray_compare-与-fixedarray_eq_unrepresentable) / [`_eq_unrepresentable`](#fixedarray_compare_fixed_arrayfixedarray_compare-与-fixedarray_eq_unrepresentable)       | 无溢出整除跨 scale 比较网关与不可表示值逐元素判等                                 |
@@ -1219,40 +1222,41 @@ ValueError: rounding=None 时不支持缩小 scale（需要指定舍入模式）
 a / b
 ```
 
-逐元素除法，商保留 `max(a.scale, b.scale)` 位小数，按 `half_up` 舍入。
+逐元素真除法：等价于不指定 `scale` 的 [`a.divide(b)`](#fixedarraydivide)（默认先按 `max(a.scale, b.scale) + 8` 位计算并在放不下 `int64` 时自适应少保留几位，按 `half_up` 舍入后去掉末尾多余的 `0`，且至少保留 `max(a.scale, b.scale)` 位小数）。
 
 **参数**
 
-- **b** : *FixedArray 或数值 array_like* — 除数，可广播，不能含 0。
+- **b** : *FixedArray 或数值 array_like* — 除数，可广播，非缺失位置不能含 0。
 
 **返回值**
 
-- **out** : *FixedArray* — `scale = max(a.scale, b.scale)`。
+- **out** : *FixedArray* — `scale` 位于 `[max(a.scale, b.scale), max(a.scale, b.scale) + 8]` 之间。
 
 **异常**
 
 - **TypeError** — `b` 不是合法的数值操作数。
 - **ZeroDivisionError** — 非缺失位置上除数含 0（被 `mask` 标记为 `<NA>` 的位置跳过检查并传播 `<NA>`）。
-- **OverflowError** — 商超出 `int64`。
+- **OverflowError** — 商即使只保留 `max(a.scale, b.scale)` 位小数也超出 `int64` 范围。
 
 **机制说明**
 
-等价于 `a.divide(b)`，需要其他精度或舍入模式时请直接调用 [`divide`](#fixedarraydivide)。
-
-> **注意**：两个整数相除得到的也是整数精度（scale 0）。`FixedArray(1) / 3` 的结果是 `0`，不是 `0.333…`。
-> 需要小数时请让被除数带上 scale（如 `FixedArray("1.00")`），或使用 `divide(..., scale=n)`。
+等价于 `a.divide(b)`：能整除或有限小数时不会拖带多余的末尾 `0`（如 `FixedArray("189.50") / 2` 得到 `scale=2` 的 `94.75`，`FixedArray(10) / 4` 得到 `scale=1` 的 `2.5`）；除不尽时自动多保留最多 `8` 位小数（如 `FixedArray(1) / 3` 得到 `scale=8` 的 `0.33333333`）。需要固定小数位数或其他舍入模式时请调用 [`divide(b, scale=..., rounding=...)`](#fixedarraydivide)。
 
 **示例**
 
 ```python
->>> FixedArray("10.00") / 3
-FixedArray(3.33, scale=2)
+>>> FixedArray("189.50") / 2  # 整除：去掉多余末尾 0，至少保留 max(2, 0) = 2 位
+FixedArray(94.75, scale=2)
+>>> FixedArray("10.00") / 3  # 除不尽：保留 2 + 8 = 10 位小数
+FixedArray(3.3333333333, scale=10)
 >>> FixedArray(["10.00", "20.00", "30.00"]) / FixedArray([3, 6, 7])
-FixedArray([3.33, 3.33, 4.29], scale=2)
+FixedArray([3.3333333333, 3.3333333333, 4.2857142857], scale=10)
 >>> 1 / FixedArray("4.00")
 FixedArray(0.25, scale=2)
->>> FixedArray(1) / 3  # 整数 / 整数 → scale 0
-FixedArray(0, scale=0)
+>>> FixedArray(1) / 3  # 整数除不尽：自动保留 0 + 8 = 8 位小数
+FixedArray(0.33333333, scale=8)
+>>> FixedArray(10 ** 12) / 3  # +8 位放不下 int64 时自动缩减为 7 位小数，不报错
+FixedArray(333333333333.3333333, scale=7)
 >>> FixedArray(1) / 0
 Traceback (most recent call last):
     ...
@@ -1288,8 +1292,8 @@ FixedArray.divide(other, scale=None, rounding="half_up")
 
 **参数**
 
-- **other** : *FixedArray 或数值 array_like* — 除数，可广播，不能含 0。
-- **scale** : *int，可选* — 商的小数位数，默认 `max(self.scale, other.scale)`。
+- **other** : *FixedArray 或数值 array_like* — 除数，可广播，非缺失位置不能含 0。
+- **scale** : *int，可选* — 商的小数位数。默认 `None` 时自动确定：先调用 [`_auto_division_scale`](#fixedarray_auto_division_scale) 取 `max(self.scale, other.scale) + DIVISION_EXTRA_DIGITS`（`8`）位（若商在该精度下放不下 `int64` 则自适应减少额外小数位，最少保留 `max(两侧 scale)` 位），完成舍入后再调用 [`_squeeze_scale`](#fixedarray_squeeze_scale) 去掉全体元素共同的末尾 `0`（同样至少保留 `max(两侧 scale)` 位）。显式传入 `scale` 时严格保留 `scale` 位小数（不去末尾 `0`）。
 - **rounding** : *RoundingMode 或 str，默认 `"half_up"`* — 舍入模式，六种均支持，见 [`RoundingMode`](#roundingmode)。
 
 **返回值**
@@ -1301,21 +1305,17 @@ FixedArray.divide(other, scale=None, rounding="half_up")
 - **TypeError** — `other` 不是合法的数值操作数。
 - **ValueError** — `rounding` 无效或 `scale` 不是非负整数。
 - **ZeroDivisionError** — 非缺失位置上除数含 0（被 `mask` 标记为 `<NA>` 的位置跳过检查并传播 `<NA>`）。
-- **OverflowError** — 商超出 `int64`。
+- **OverflowError** — 商超出 `int64`（当 `scale=None` 时，表示即使只保留 `max(两侧 scale)` 位小数也放不下 `int64`）。
 
 **机制说明**
 
-商的尾数等于 `round(a.mantissa × 10^k / b.mantissa)`，其中 `k = scale + b.scale - a.scale`，按 `k` 的符号分三种情况：
+确定计算精度 `target`（`scale=None` 时由 [`_auto_division_scale`](#fixedarray_auto_division_scale) 给出，否则为 `self._check_scale(scale)`）后，商的尾数等于 `round(a.mantissa × 10^shift / b.mantissa)`，其中 `shift = target + b.scale - a.scale`，按 `shift` 的符号分三种情况：
 
-- **k > 0（需要更多小数位）**：分段长除法。先做带余除法，再把 `10^k` 分段乘进余数，每段位数保证 `|余数|·10^c`
-  不越界；当除数绝对值超过 `int64` 上限的 1/10 时，普通 `r·10` 会溢出，自动切换至无溢出二进制倍增内核
-  （将余数与除数转为补码 `uint64`，利用 `10r = 8r + 2r` 且 `2r < 2·abs(d) ≤ 2**64` 逐位推进）。每段与终局进位均做精确的商越界检查，因此只有
-  **商本身**超出 `int64` 才会报错。
-- **k = 0**：一次带余除法加舍入判定（此时 `-2**63 / -1 = 2**63` 超出 `int64`，抛出 `OverflowError`）。
-- **k < 0（需要更少小数位）**：先做带余除法得到整数商 `q` 与余数 `r`，再将 `(q + r/d)` 整体除以 `10^|k|` 并按 `rounding`
-  一次性舍入（支持任意大的 `|k|`，包括 `|k| > 18`），不会因放大除数而假溢出。对于被除数尾数为 `-2**63` 且除数尾数为 `-1`
-  的边界情形，由于继续除以 `10^|k|`（`|k| ≥ 1`）后结果已在 `int64` 范围内，内部通过翻转 `floor` / `ceil` 方向在负数域完成精确舍入后再取反，避免
-  `np.divmod(-2**63, -1)` 硬件溢出。
+- **shift > 0（需要更多小数位）**：调用 [`_chunked_divmod_round`](#fixedarray_chunked_divmod_round) 执行分段长除法。先做带余除法，再把 `10^shift` 分段乘进余数，每段位数保证 `|余数|·10^c` 不越界；当除数绝对值超过 `int64` 上限的 1/10 时，自动切换至无溢出二进制倍增内核 [`_doubling_step_10r`](#fixedarray_doubling_step_10r)。每段与终局进位均做精确的商越界检查，因此只有 **商本身**超出 `int64` 才会报错。
+- **shift = 0**：调用 [`_divmod_round`](#fixedarray_divmod_round) 执行一次带余除法加舍入判定（此时 `-2**63 / -1 = 2**63` 超出 `int64`，抛出 `OverflowError`）。
+- **shift < 0（需要更少小数位）**：先做带余除法得到整数商 `q` 与余数 `r`，再调用 [`_round_div_pow10`](#fixedarray_round_div_pow10) 将 `(q + r/d)` 整体除以 `10^|shift|` 并按 `rounding` 一次性舍入（支持任意大的 `|shift|`，包括 `|shift| > 18`），不会因放大除数而假溢出。对于被除数尾数为 `-2**63` 且除数尾数为 `-1` 的边界情形，由于继续除以 `10^|shift|`（`|shift| ≥ 1`）后结果已在 `int64` 范围内，内部通过翻转 `floor` / `ceil` 方向在负数域完成精确舍入后再取反，避免 `np.divmod(-2**63, -1)` 硬件溢出。
+
+最后，若 `scale is None`，对计算结果调用 [`result._squeeze_scale(max(self.scale, other.scale))`](#fixedarray_squeeze_scale) 剥离多余的共同末尾 `0`。
 
 **示例**
 
@@ -2931,27 +2931,29 @@ ValueError: 输入的小数位数 (3) 超出指定 scale (2)
 
 - [`PrecisionLossWarning`](#precisionlosswarning)
 - [`user_stacklevel`](_utils.md#user_stacklevel)
-- [`_ON_EXCESS`、`_MAX` 与 `_MIN`](#_on_excess_max-与-_min)
+- [`_ON_EXCESS`、`DIVISION_EXTRA_DIGITS`、`_LOG10_MAX`、`_MAX` 与 `_MIN`](#_on_excessdivision_extra_digits_log10_max_max-与-_min)
 
-### `_ON_EXCESS`、`_MAX` 与 `_MIN`
+### `_ON_EXCESS`、`DIVISION_EXTRA_DIGITS`、`_LOG10_MAX`、`_MAX` 与 `_MIN`
 
 ```python
 moneta.fixed_array._ON_EXCESS = ('raise', 'warn')
+moneta.fixed_array.DIVISION_EXTRA_DIGITS = 8
+moneta.fixed_array._LOG10_MAX = math.log10((1 << 63) - 1)
 moneta.fixed_array._MAX = 9223372036854775807   # (1 << 63) - 1
 moneta.fixed_array._MIN = -9223372036854775808  # -(1 << 63)
 ```
 
 - **`_ON_EXCESS`**：构造器 `on_excess` 参数允许的合法取值元组 `('raise', 'warn')`。
-- **`_MAX` / `_MIN`**：有符号 64 位整数（`int64`）的最大值 `2**63 - 1` 与最小值 `-2**63`，用于 [
-  `_as_int64`](#fixedarray_as_int64)、[`_mul_pow10`](#fixedarray_mul_pow10)、[
-  `_doubling_step_10r`](#fixedarray_doubling_step_10r) 及算术溢出边界判定。
+- **`DIVISION_EXTRA_DIGITS`**：公开常量 `8`（包含在 `moneta.fixed_array.__all__` 中），表示不指定 `scale` 的除法（[`a / b`](#a--b真除法)、[`divide`](#fixedarraydivide) 及上层 [`Money.divide`](money.md#moneydivide)、[`Price.divide`](price.md#pricedivide)、[`Quantity.divide`](quantity.md#quantitydivide)）在 `max(两侧 scale)` 之外最多额外保留的小数位数。
+- **`_LOG10_MAX`**：`math.log10(_MAX)`（约 `18.964889726830812`），供 [`_auto_division_scale`](#fixedarray_auto_division_scale) 在大商场景下估算可容纳的十进制小数位数上限。
+- **`_MAX` / `_MIN`**：有符号 64 位整数（`int64`）的最大值 `2**63 - 1` 与最小值 `-2**63`，用于 [`_as_int64`](#fixedarray_as_int64)、[`_mul_pow10`](#fixedarray_mul_pow10)、[`_doubling_step_10r`](#fixedarray_doubling_step_10r) 及算术溢出边界判定。
 
 **示例**
 
 ```python
->>> from moneta.fixed_array import _MAX, _MIN, _ON_EXCESS
->>> _ON_EXCESS, _MAX == (1 << 63) - 1, _MIN == -(1 << 63)
-(('raise', 'warn'), True, True)
+>>> from moneta.fixed_array import DIVISION_EXTRA_DIGITS, _LOG10_MAX, _MAX, _MIN, _ON_EXCESS
+>>> _ON_EXCESS, DIVISION_EXTRA_DIGITS, round(_LOG10_MAX, 4), _MAX == (1 << 63) - 1, _MIN == -(1 << 63)
+(('raise', 'warn'), 8, 18.9649, True, True)
 ```
 
 ### FixedArray._check_scale
@@ -3312,6 +3314,91 @@ FixedArray._round_div_pow10(q, r, d, k, mode)
 >>> int(FixedArray._round_div_pow10(5_000_000_000_000_000_000, 0, 1, k=19, mode="half_up"))
 1
 ```
+
+### FixedArray._auto_division_scale
+
+```python
+@staticmethod
+FixedArray._auto_division_scale(num, den, num_scale, den_scale)
+```
+
+计算不显式指定 `scale` 时除法商的目标小数位数：优先取 `top = max(num_scale, den_scale) + DIVISION_EXTRA_DIGITS`（即 `+ 8` 位）；当商在该精度下放不下 `int64` 时，自动逐位减少额外保留的小数位，最少保留 `base = max(num_scale, den_scale)` 位（若保留 `base` 位仍放不下，则交由后续除法本身抛出 `OverflowError`）。
+
+**参数**
+
+- **num, den** : *numpy.ndarray（int64）* — 被除数与除数尾数数组（缺失位置已由调用方预处理为 `0` 和 `1`）。
+- **num_scale, den_scale** : *int* — 被除数与除数的小数位数。
+
+**返回值**
+
+- **target** : *int* — 位于 `[max(num_scale, den_scale), max(num_scale, den_scale) + 8]` 之间的目标小数位数。
+
+**机制说明**
+
+采用**快慢两级上界判定**：
+
+1. **零开销整数全局上界快路径**：调用 [`max_abs(num)`](_utils.md#max_abs) 取最大被除数绝对值 `a`，并取非零除数的最小绝对值 `b`。若 `a == 0` 或无非零除数，直接返回 `top`。否则用 Python 任意精度整数计算全局最坏商尾数上界 `bound = a * 10**shift // b + 1`（其中 `shift = top + den_scale - num_scale`）：只要 `bound <= _MAX`（绝大多数日常输入均在此步通过），立即返回 `top`；
+2. **逐元素浮点比率估算慢路径**：仅当全局最坏上界超出 `_MAX` 时，才逐元素计算 `ratio = abs(num.astype(float64)) / abs(den.astype(float64))` 的最大值 `largest`，由 `room = _LOG10_MAX - 1e-9 - math.log10(largest) - (den_scale - num_scale)`（预留 `1e-9` 相对余量以覆盖 `float64` 舍入误差与终局进位）算出 `int64` 最多能容纳的小数位数 `max(base, min(top, math.floor(room)))`。
+
+**示例**
+
+```python
+>>> a = lambda *v: np.array(v, dtype=np.int64)
+>>> FixedArray._auto_division_scale(a(1), a(3), 0, 0)  # 常规：0 + 8 = 8 位
+8
+>>> FixedArray._auto_division_scale(a(10 ** 12), a(3), 0, 0)  # +8 位超出 int64，自动缩减为 7 位
+7
+>>> FixedArray._auto_division_scale(a((1 << 63) - 1), a(1), 0, 0)  # 1 位都多留不下，退回 base = 0
+0
+>>> FixedArray._auto_division_scale(a(10 ** 12, 1), a(10 ** 6, 3), 0, 0)  # 逐元素真实最大商为 10^6，仍可保留 8 位
+8
+```
+
+**另请参阅**
+
+- [`FixedArray.divide`](#fixedarraydivide)
+- [`FixedArray._squeeze_scale`](#fixedarray_squeeze_scale)
+
+### FixedArray._squeeze_scale
+
+```python
+FixedArray._squeeze_scale(min_scale)
+```
+
+去掉当前 `FixedArray` 全体元素共同的十进制末尾 `0`，但至少保留 `min_scale` 位小数；数值与缺失值掩码 `mask` 完全不变（因为缺失位置的底层尾数恒为 `0`，天然能被任意 $10^k$ 整除，不会阻碍有效元素去零）。
+
+**参数**
+
+- **min_scale** : *int* — 至少需要保留的小数位数下限（在自动除法中传入 `max(self.scale, other.scale)`）。
+
+**返回值**
+
+- **out** : *FixedArray* — 剥离共同末尾 `0` 后的 `FixedArray`（若 `self.scale <= min_scale` 或至少有一个元素末位非 `0`，直接原样返回 `self`）。
+
+**机制说明**
+
+设最多可剥离的位数为 `room = self.scale - min_scale`（`room <= 0` 时直接返回 `self`）：
+
+- **0 维标量**：直接转为 Python `int` 循环检测 `v % 10 == 0`（若 `v == 0` 则一步去满 `k = room`）；
+- **多维数组**：先测试 `divisible(1)`（即 `not np.any(m % 10)`）：除不尽的结果（如 `1 / 3`）末位非 `0`，在第一次测试后立即返回 `self`；若通过，再测试 `divisible(room)`（整除结果往往能一次性去满全部额外位）；若仍处于中间情况，则在 `[1, room - 1]` 区间内**二分查找**最大可整除位数 `k`，最后返回 `_from_mantissa(m // 10**k, self.scale - k, mask=self.mask)`。
+
+**示例**
+
+```python
+>>> FixedArray._from_mantissa(1500, 3)._squeeze_scale(0)  # 1.500 -> 1.5 (scale=1)
+FixedArray(1.5, scale=1)
+>>> FixedArray._from_mantissa(1500, 3)._squeeze_scale(2)  # 至少保留 min_scale=2 位 -> 1.50
+FixedArray(1.50, scale=2)
+>>> FixedArray._from_mantissa([1000, 2500, 30000], 4)._squeeze_scale(0)
+FixedArray([0.10, 0.25, 3.00], scale=2)
+>>> FixedArray._from_mantissa([5, 1200], 3, mask=[True, False])._squeeze_scale(0)  # 缺失位置不影响去零
+FixedArray([<NA>, 1.2], scale=1)
+```
+
+**另请参阅**
+
+- [`FixedArray._auto_division_scale`](#fixedarray_auto_division_scale)
+- [`FixedArray.divide`](#fixedarraydivide)
 
 ### FixedArray._limbs_to_mantissa
 

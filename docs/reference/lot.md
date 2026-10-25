@@ -631,7 +631,7 @@ $$r = \frac{\text{profit\_loss}(\text{price}, \text{fx})}{\text{cost\_base}}$$
 
 **返回值**
 
-- **out** : *FixedArray* — 无量纲收益率定点数，小数位数为 `self.base_currency.digits + 8`（由 [`Money.divide`](money.md#moneydivide) 决定）。
+- **out** : *FixedArray* — 无量纲收益率定点数，精度遵循 [`FixedArray.divide`](fixed_array.md#fixedarraydivide) 的默认规则（默认保留 `self.base_currency.digits + 8` 位小数，放不下 `int64` 时少保留，最后去掉末尾 `0` 且至少保留 `base_currency.digits` 位）。
 
 **异常**
 
@@ -643,8 +643,10 @@ $$r = \frac{\text{profit\_loss}(\text{price}, \text{fx})}{\text{cost\_base}}$$
 >>> from moneta import Instrument, Money, PositionLot, Quantity
 >>> from moneta.fx import ExchangeRate
 >>> aapl = Instrument("AAPL", "USD")
+>>> PositionLot(aapl, Quantity(10), "2024-01-02", cost=Money("1000", "USD")).return_rate(110)  # 整除：去末尾 0 保留 2 位
+FixedArray(0.10, scale=2)
 >>> lot = PositionLot(aapl, Quantity(10), "2024-01-02", cost=Money("1000", "USD"), cost_base=Money("7000", "CNY"))
->>> lot.return_rate(100, fx=ExchangeRate("7.2", "USD", "CNY"))  # (7200 - 7000) / 7000 = 200 / 7000
+>>> lot.return_rate(100, fx=ExchangeRate("7.2", "USD", "CNY"))  # 除不尽：(7200 - 7000) / 7000 保留 2 + 8 = 10 位
 FixedArray(0.0285714286, scale=10)
 >>> gift = PositionLot(aapl, Quantity(1), "2024-01-02", cost=Money(0, "USD"))
 >>> gift.return_rate(100)
@@ -851,7 +853,7 @@ Quantity(FixedArray(2, scale=0), unit='barrel')
 moneta.lot._convert_at_rate(money, rate, target)
 ```
 
-用 `money.currency` 与目标币种 `target` 之间的 `ExchangeRate`（任一方向）将金额 `money` 换算为 `target` 币种，全程**只舍入一次**，且缺失值 `<NA>` 保持为缺失值。同时供 [`PositionLot.market_value`](#positionlotmarket_value) 与 `Portfolio` 复用。
+用 `money.currency` 与目标币种 `target` 之间的 `ExchangeRate`（任一方向）将金额 `money` 换算为 `target` 币种，全程**只舍入一次**，且缺失值 `<NA>` 保持为缺失值。同时供 [`PositionLot.market_value`](#positionlotmarket_value) 与 [`Portfolio`](portfolio.md) 复用。
 
 **参数**
 

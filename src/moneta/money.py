@@ -7,7 +7,7 @@
 - 构造时 float 按最短写法 half_up 舍入；精确输入（str、Decimal、Fraction、FixedArray 等）超出币种精度时
   由 FixedArray 发出 PrecisionLossWarning 后按 half_up 舍入。
 - 运算只接受数值白名单内的操作数，拒绝字符串；运算符遇到不认识的类型返回 NotImplemented。
-- 除法结果若不是金额（比率、单价、数量），默认保留 币种精度 + 8 位小数，可用 scale 指定。
+- 除法结果若不是金额（比率、单价、数量），按 FixedArray.divide 的默认精度：默认保留 max(两侧 scale) + 8 位小数（商放不下 int64 时少保留几位），并去掉末尾的 0；可用 scale 指定。
 """
 
 from __future__ import annotations
@@ -21,7 +21,6 @@ from .currency import Currency, get_currency
 from .fixed_array import FixedArray, RoundingMode
 from .unit_array import UnitArray
 
-_RATIO_EXTRA_DIGITS = 8  # 比率、单价、数量相对币种精度额外保留的小数位数
 
 Rounding = Union[RoundingMode, str]
 
@@ -189,7 +188,7 @@ class Money(UnitArray):
         - Money / 无量纲数值 → Money，按 rounding 舍入到币种精度；给出 step 时一次性舍入到步长网格；
         - Money / 同币种 Money → 无量纲比率 FixedArray；
         - Money / Price → Quantity（数量）；Money / Quantity → Price（单价）。
-        结果不是 Money 时默认保留 币种精度 + 8 位小数，可用 scale 指定；此时不接受 step。
+        结果不是 Money 时默认保留 max(两侧 scale) + 8 位小数（商放不下 int64 时少保留几位），并去掉末尾的 0，可用 scale 指定；此时不接受 step。
         结果是 Money 时精度固定为币种精度，不接受 scale。
         """
         from .price import Price
@@ -199,7 +198,7 @@ class Money(UnitArray):
         if isinstance(other, (Money, Price, Quantity)):
             if step is not None:
                 raise ValueError("step 只适用于结果为 Money 的除法")
-            target = self._currency.digits + _RATIO_EXTRA_DIGITS if scale is None else FixedArray._check_scale(scale)
+            target = None if scale is None else FixedArray._check_scale(scale)
             if isinstance(other, Money):
                 self._check_compatible(other)
                 return self._data.divide(other._data, scale=target, rounding=mode)

@@ -226,7 +226,7 @@ class PositionLot:
     pnl = profit_loss
 
     def return_rate(self, price: Any = None, fx: Any = None) -> FixedArray:
-        """收益率 = 盈亏 / cost_base（比率 FixedArray，保留基准货币精度 + 8 位小数）；成本为 0 时报 ZeroDivisionError。"""
+        """收益率 = 盈亏 / cost_base（比率 FixedArray，精度同 FixedArray.divide 的默认规则）；成本为 0 时报 ZeroDivisionError。"""
         return self.profit_loss(price, fx).divide(self._cost_base)
 
     # ---------- 不可变与展示 ----------

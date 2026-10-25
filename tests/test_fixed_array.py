@@ -1165,32 +1165,55 @@ class TestMatmul:
 
 
 class TestDivide:
-    def test_default_scale_is_max_of_operands(self):
-        assert (F("1") / 3).scale == 0 and int((F("1") / 3).mantissa) == 0
-        assert decimals(F("1.23") / F("2")) == Decimal("0.62")
-        assert decimals(F("1.2") / F("2.000")) == Decimal("0.600")
+    def test_default_scale_plus_extra_digits_then_trim(self):
+        # 默认：max(两侧 scale) + 8 位，去掉末尾的 0（至少保留 max(两侧 scale) 位）
+        assert (F("1") / 3).scale == 8 and decimals(F("1") / 3) == Decimal("0.33333333")
+        assert decimals(F("1.23") / F("2")) == Decimal("0.615") and (F("1.23") / 2).scale == 3
+        assert (F("1.2") / F("2.000")).scale == 3 and decimals(F("1.2") / F("2.000")) == Decimal("0.600")  # 不少于 3 位
+        assert (F("189.50") / 2).scale == 2 and F("189.50") / 2 == F("94.75")
+        assert (F(100) / 2).scale == 0 and (F(10) / 4).scale == 1
         a = F("1.23456789012")
-        assert (a / 2).scale == 11 and (a / 2) == (a / F(2))
-        assert F("1.5").divide(7) == F("1.5") / 7
+        assert (a / 2).scale == 11 and (a / 2) == (a / F(2)) and a / 2 == F("0.61728394506")  # 整除，保持 11 位
+        assert F("1.5").divide(7) == F("1.5") / 7 and (F("1.5") / 7).scale == 9
+        assert fixed_array_module.DIVISION_EXTRA_DIGITS == 8
+
+    def test_default_scale_shrinks_to_fit_int64(self):
+        assert F(10 ** 12) / 3 == F("333333333333.3333333")  # 只放得下 7 位小数
+        assert (F([10 ** 12, 1]) / F([1, 3])).scale == 6  # 全体元素共用 scale，由最大的商决定
+        assert (F(100) / 3 / 3 / 3 / 3).scale == 16  # 连续除法不再溢出
+        with pytest.raises(OverflowError):
+            F(2 ** 62) / F("0.5")  # 保留 max(两侧 scale) 位也放不下：真溢出
+        with pytest.raises(OverflowError):
+            F(1) / F("1e-20")
+        assert (F([None, 4]) / 2).isna().tolist() == [True, False] and (F([None, 4]) / 2).scale == 0
+        assert (F(0) / 7).scale == 0 and (F([0, 0], scale=3) / 7).scale == 3
+
+    def test_explicit_scale_unchanged(self):
+        assert F("1").divide(3, scale=0) == 0 and F("189.50").divide(2, scale=10).scale == 10
 
     def test_reflected(self):
         assert 10 / F("2.5") == F("4.0")
         assert (np.array([1, 3]) / F("2.0")).mantissa.tolist() == [5, 15]
 
     def test_sign_and_ties(self):
-        assert decimals(F("1.00000000") / -3) == Decimal("-0.33333333")
-        assert decimals(F("-2.00000000") / F("3")) == Decimal("-0.66666667")
-        assert int((F("1.00000000") / 200_000_000).mantissa) == 1  # 0.5e-8 进位
-        assert int((F("1.00000000") / -200_000_000).mantissa) == -1
+        assert decimals(F("1.00000000").divide(-3, scale=8)) == Decimal("-0.33333333")
+        assert decimals(F("-2.00000000").divide(F("3"), scale=8)) == Decimal("-0.66666667")
+        assert int(F("1.00000000").divide(200_000_000, scale=8).mantissa) == 1  # 0.5e-8 进位
+        assert int(F("1.00000000").divide(-200_000_000, scale=8).mantissa) == -1
+        assert decimals(F("-2") / 3) == Decimal("-0.66666667")
 
     def test_against_decimal(self):
         rng = np.random.default_rng(4)
         a_texts = [f"{x:.2f}" for x in rng.uniform(-1e4, 1e4, 200)]
         b_texts = [f"{x:.3f}" for x in rng.uniform(0.5, 50, 200) * rng.choice([-1, 1], 200)]
-        result = F(a_texts) / F(b_texts)
+        result = F(a_texts).divide(F(b_texts), scale=3)
         assert result.scale == 3
         assert result.mantissa.tolist() == [quantized_units(Decimal(x) / Decimal(y), 3) for x, y in
                                             zip(a_texts, b_texts)]
+        auto = F(a_texts) / F(b_texts)  # 默认 3 + 8 位：商最大约 2 万，放得下
+        assert auto.scale == 11
+        assert auto.mantissa.tolist() == [quantized_units(Decimal(x) / Decimal(y), 11) for x, y in
+                                          zip(a_texts, b_texts)]
 
     def test_divide_with_scale_and_rounding(self):
         assert decimals(F("1").divide(3, scale=2)) == Decimal("0.33")
@@ -2469,3 +2492,55 @@ class TestRegressions:
             warnings.simplefilter("error", DeprecationWarning)
             with pytest.raises(OverflowError, match="舍入后超出"):
                 raw(6456360425798343065, 0).divide(raw(7, 0), scale=1, rounding="up")  # 商为 MAX 走 object 路径
+
+    # ---- 默认除法精度：+8 位、放不下时少保留、去掉末尾的 0 ----
+    def test_trim_trailing_zeros(self):
+        assert raw(1500, 3)._squeeze_scale(0) == F("1.5") and raw(1500, 3)._squeeze_scale(0).scale == 1
+        assert raw(1500, 3)._squeeze_scale(2).scale == 2  # 至少保留 min_scale 位
+        assert raw(0, 9)._squeeze_scale(2).scale == 2 and raw(7, 3)._squeeze_scale(0).scale == 3
+        x, y = raw(1500, 3), raw(7, 3)
+        assert x._squeeze_scale(3) is x and y._squeeze_scale(0) is y  # 不能去时返回自身
+        arr = raw([1000, 2500, 30000], 4)
+        assert arr._squeeze_scale(0).scale == 2 and arr._squeeze_scale(0).mantissa.tolist() == [10, 25, 300]
+        assert raw([10, 7], 1)._squeeze_scale(0).scale == 1  # 有一个元素不能去：整体不去
+        assert raw([10 ** 8 * 3, 10 ** 8 * 5], 8)._squeeze_scale(0).mantissa.tolist() == [3, 5]  # 一次去满
+        assert raw([10 ** 5, 10 ** 7], 8)._squeeze_scale(0).scale == 3  # 二分查找
+        masked = F._from_mantissa(np.array([5, 1200]), 3, mask=[True, False])._squeeze_scale(0)
+        assert masked.scale == 1 and masked.isna().tolist() == [True, False] and masked.mantissa.tolist() == [0, 12]
+        assert raw(np.zeros(0, dtype=np.int64), 5)._squeeze_scale(0).scale == 0
+        assert raw([MIN], 3)._squeeze_scale(0).scale == 3 and raw(-1200, 3)._squeeze_scale(0) == F("-1.2")
+
+    def test_auto_division_scale(self):
+        a = lambda *v: np.array(v, dtype=np.int64)
+        assert F._auto_division_scale(a(1), a(3), 0, 0) == 8
+        assert F._auto_division_scale(a(150), a(1), 2, 0) == 10
+        assert F._auto_division_scale(a(0), a(0), 2, 3) == 11  # 全为 0 / 除零：交给除法本身
+        assert F._auto_division_scale(a(10 ** 12), a(3), 0, 0) == 7  # 浮点上界：3.3e11·10^7 < 2^63 ≤ 3.3e11·10^8
+        assert F._auto_division_scale(a(MAX), a(1), 0, 0) == 0  # 一位都放不下：保留 max(两侧 scale)
+        assert F._auto_division_scale(a(MAX, 1), a(-1, 7), 5, 2) == 5
+        assert F._auto_division_scale(a(10 ** 12, 1), a(10 ** 6, 3), 0, 0) == 8  # 逐元素上界：最大的商是 1e6
+        assert F._auto_division_scale(a(1), a(1), 400, 0) == 408  # 极大 scale 不在 float 上溢出
+
+    def test_default_division_random_against_fraction(self):
+        rng = random.Random(97)
+        for _ in range(3000):
+            sa, sb = rng.randint(0, 12), rng.randint(0, 12)
+            ma = rng.choice([random_mantissa(rng), rng.randint(-10 ** 6, 10 ** 6)])
+            mb = rng.choice([random_mantissa(rng), rng.randint(1, 10 ** 4) * rng.choice([1, -1])]) or 7
+            exact = Fraction(ma, 10 ** sa) / Fraction(mb, 10 ** sb)
+            base = max(sa, sb)
+            try:
+                got = raw(ma, sa) / raw(mb, sb)
+            except OverflowError:
+                assert not fits(ref_round(exact * 10 ** base, "half_up")), (ma, sa, mb, sb)
+                continue
+            s = got.scale
+            assert base <= s <= base + 8
+            # 数值 = 按 got 的 scale 舍入的精确商（去零不改变数值）
+            assert value(got) == Fraction(ref_round(exact * 10 ** s, "half_up"), 10 ** s), (ma, sa, mb, sb)
+            if s > base:  # 去过零：末位不是 0
+                assert int(got.mantissa) % 10 != 0
+            full = ref_round(exact * 10 ** (base + 8), "half_up")
+            if fits(full):  # +8 位放得下时，结果就是 +8 位的商去零
+                assert value(got) == Fraction(full, 10 ** (base + 8))
+

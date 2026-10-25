@@ -5,7 +5,7 @@
 约定：
 - 量纲为 [计价货币 / 标的单位]；两个 Price 兼容当且仅当计价货币相同、单位相同或任一方为通配单位 "Any"，
   Price 与 Quantity 相乘时同样双向通配。运算结果取具体的那个单位。
-- 运算精确：乘以数值时 scale 为两侧之和；除法默认保留 max(两侧 scale) + 8 位小数；
+- 运算精确：乘以数值时 scale 为两侧之和；除法按 FixedArray.divide 的默认精度（默认保留 max(两侧 scale) + 8 位小数（商放不下 int64 时少保留几位），并去掉末尾的 0）；
   需要对齐报价网格时显式调用 round_to_step（不传 step 时使用自带的 tick）。Price × Quantity → Money（multiply 的 rounding 决定舍入），
   结果为 Money 时精度固定为币种精度。
 - tick_size 是元数据：构造时不要求价格在网格上（由 round_to_step / is_on_step 显式处理），不参与相等比较；两个 Price 运算时 tick 相同则保留，否则结果没有 tick。
@@ -27,7 +27,6 @@ from .money import Money
 from .quantity import Quantity
 from .unit_array import UnitArray
 
-_RATIO_EXTRA_DIGITS = 8  # 除法结果相对两侧 scale 额外保留的小数位数
 _KEEP = object()  # _create_like 的哨兵：沿用原来的 tick
 
 Rounding = Union[RoundingMode, str]
@@ -211,18 +210,16 @@ class Price(UnitArray):
         """价格除法：
         - Price / 同计价货币、兼容单位的 Price → 无量纲比率 FixedArray；
         - Price / 无量纲数值 → Price。
-        默认保留 max(两侧 scale) + 8 位小数，可用 scale 指定；按 rounding 舍入。
+        默认保留 max(两侧 scale) + 8 位小数（商放不下 int64 时少保留几位），并去掉末尾的 0；可用 scale 指定；按 rounding 舍入。
         """
         mode = check_rounding(rounding)
         if isinstance(other, Price):
             self._check_compatible(other)
-            target = max(self.scale, other.scale) + _RATIO_EXTRA_DIGITS if scale is None else scale
-            return self._data.divide(other._data, scale=target, rounding=mode)
+            return self._data.divide(other._data, scale=scale, rounding=mode)
         if isinstance(other, UnitArray):
             raise TypeError(f"价格只能除以数值或同类 Price，收到 {type(other).__name__}")
         divisor = self._as_factor(other, "除数")
-        target = max(self.scale, divisor.scale) + _RATIO_EXTRA_DIGITS if scale is None else scale
-        return self._create_like(self._data.divide(divisor, scale=target, rounding=mode))
+        return self._create_like(self._data.divide(divisor, scale=scale, rounding=mode))
 
     def __truediv__(self, other: Any) -> Union["Price", FixedArray]:
         if not isinstance(other, Price) and not FixedArray._is_numeric_operand(other):

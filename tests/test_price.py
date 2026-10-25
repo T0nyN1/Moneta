@@ -350,16 +350,18 @@ class TestAddSub:
 class TestDivide:
     def test_ratio(self):
         r = Price("189.50", "USD") / Price("100", "USD")
-        assert isinstance(r, F) and r == F("1.895") and r.scale == 10
+        assert isinstance(r, F) and r == F("1.895") and r.scale == 3  # 2 + 8 位后去掉末尾的 0
+        assert (Price("1", "USD") / Price("3", "USD")).scale == 8
         assert Price("1", "USD").divide(Price("3", "USD"), scale=3, rounding="up") == F("0.334")
         with pytest.raises(TypeError, match="价格量纲不匹配"):
             Price("1", "USD") / Price("1", "CNY")
 
     def test_by_number(self):
         p = Price("189.50", "USD", base_unit="barrel") / 2
-        assert isinstance(p, Price) and p.base_unit == "barrel" and p.scale == 10 and p.data == F("94.75")
+        assert isinstance(p, Price) and p.base_unit == "barrel" and p.scale == 2 and p.data == F("94.75")
         assert Price("10", "USD").divide(3, scale=2) == Price("3.33", "USD")
-        assert (Price("1.5", "USD") / Decimal("0.25")).scale == 10  # max(1, 2) + 8
+        assert Price("10", "USD") / 3 == Price("3.33333333", "USD")  # 0 + 8 位，不会被截到币种精度
+        assert (Price("1.5", "USD") / Decimal("0.25")).scale == 2  # 整除：6.00，至少保留 max(1, 2) 位
         with pytest.raises(ZeroDivisionError):
             Price("1", "USD") / 0
 

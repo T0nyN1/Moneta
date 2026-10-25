@@ -52,8 +52,8 @@ Price(FixedArray(10.25, scale=2), quote_currency='USD', base_unit='share')
 | `p * qty`、`qty * p`                                       | 兼容单位的 [`Quantity`](quantity.md) | [`Money`](money.md)            | 固定为 `quote_currency.digits`，默认 `half_up`（`multiply` 可指定 `rounding`，不接受 `scale`） |
 | `p * k`、`k * p`                                           | 无量纲数值                           | `Price`                        | `p.scale + k.scale`，**精确相乘不舍入**                                                        |
 | `p.multiply(k, scale=None, rounding="half_up")`            | 无量纲数值                           | `Price`                        | `scale=None` 时精确；指定 `scale` 时按 `rounding` 一次性舍入到 `scale`                         |
-| `p1 / p2`、`p1.divide(p2, scale=None, rounding="half_up")` | 同计价币种、兼容单位的 `Price`       | [`FixedArray`](fixed_array.md) | 量纲相消得无量纲比率，默认 `max(p1.scale, p2.scale) + 8`，可用 `scale` 指定                    |
-| `p / k`、`p.divide(k, scale=None, rounding="half_up")`     | 无量纲数值                           | `Price`                        | 默认 `max(p.scale, k.scale) + 8`，可用 `scale` 指定并按 `rounding` 舍入                        |
+| `p1 / p2`、`p1.divide(p2, scale=None, rounding="half_up")` | 同计价币种、兼容单位的 `Price`       | [`FixedArray`](fixed_array.md) | 量纲相消得无量纲比率，默认 `max(p1.scale, p2.scale) + 8`（放不下 `int64` 时少保留，最后去末尾 0），可用 `scale` 指定 |
+| `p / k`、`p.divide(k, scale=None, rounding="half_up")`     | 无量纲数值                           | `Price`                        | 默认 `max(p.scale, k.scale) + 8`（放不下 `int64` 时少保留，最后去末尾 0），可用 `scale` 指定并按 `rounding` 舍入      |
 | `p.round_to_step(step=None, rounding="half_up")`           | 正数步长或 `None`                    | `Price`                        | `step=None` 时对齐到自带 `tick_size`（无 `tick_size` 则原样返回）；传入 `step` 时对齐到 `step` |
 
 ### `tick_size` 元数据语义与传播规则
@@ -99,7 +99,7 @@ Price(FixedArray(10.25, scale=2), quote_currency='USD', base_unit='share')
 |                        | [`Price._check_compatible`](#price_check_compatible)                                                                                                 | `UnitArray` 钩子：校验另一对象是否为同币种、兼容单位的 `Price`                            |
 |                        | [`Price._resolve_unit`](#price_resolve_unit)                                                                                                         | 合并两个兼容单位（优先取非 `"Any"` 的具体单位）                                           |
 |                        | [`Price._resolve_tick`](#price_resolve_tick)                                                                                                         | 合并两个 `Price` 的 `tick_size`（相等则保留，否则返回 `None`）                            |
-|                        | [`_KEEP` 与 `_RATIO_EXTRA_DIGITS`](#_keep-与-_ratio_extra_digits)                                                                                    | `_create_like` 默认沿用原 `tick` 的哨兵对象与除法额外保留位数常量（`8`）                  |
+|                        | [`_KEEP`](#_keep)                                                                                                                                    | `_create_like` 默认沿用原 `tick` 的哨兵对象                                               |
 
 ## 构造与核心属性
 
@@ -570,8 +570,7 @@ scale
 p / other
 ```
 
-将价格除以同量纲 `Price`（量纲相消返回无量纲比率 [`FixedArray`](fixed_array.md)）或除以无量纲数值（返回保留原单位与
-`tick_size` 的 `Price`），默认保留 `max(两侧 scale) + 8` 位小数并按 `half_up` 舍入。
+将价格除以同量纲 `Price`（量纲相消返回无量纲比率 [`FixedArray`](fixed_array.md)）或除以无量纲数值（返回保留原单位与 `tick_size` 的 `Price`）。默认按 [`FixedArray.divide`](fixed_array.md#fixedarraydivide) 的自动精度规则保留 `max(两侧 scale) + 8` 位小数（放不下 `int64` 时少保留几位）、按 `half_up` 舍入并去掉末尾的 `0`（至少保留 `max(两侧 scale)` 位）。
 
 **参数**
 
@@ -589,10 +588,12 @@ p / other
 **示例**
 
 ```python
->>> Price("189.50", "USD") / Price("100.00", "USD")
-FixedArray(1.8950000000, scale=10)
->>> Price("189.50", "USD", base_unit="barrel") / 2
-Price(FixedArray(94.7500000000, scale=10), quote_currency='USD', base_unit='barrel')
+>>> Price("189.50", "USD") / Price("100.00", "USD")  # 2 + 8 位后去掉末尾 0 -> scale=3
+FixedArray(1.895, scale=3)
+>>> Price("189.50", "USD", base_unit="barrel") / 2  # 整除：去末尾 0，至少保留 max(2, 0) = 2 位
+Price(FixedArray(94.75, scale=2), quote_currency='USD', base_unit='barrel')
+>>> Price("10", "USD") / 3  # 除不尽：保留 0 + 8 = 8 位
+Price(FixedArray(3.33333333, scale=8), quote_currency='USD', base_unit='share')
 ```
 
 **性能对比**
@@ -618,7 +619,7 @@ Price.divide(other, scale=None, rounding="half_up")
 **参数**
 
 - **other** : *兼容的 Price，或无量纲数值 array_like* — 除数。
-- **scale** : *int，可选* — 目标小数位数；默认 `None` 时取 `max(self.scale, other.scale) + 8`。
+- **scale** : *int，可选* — 目标小数位数；默认 `None` 时遵循 [`FixedArray.divide`](fixed_array.md#fixedarraydivide) 的自动精度规则（保留 `max(两侧 scale) + 8` 位，放不下 `int64` 时少保留，最后去掉末尾 `0`）。
 - **rounding** : *RoundingMode 或 str，默认 `"half_up"`* — 舍入模式。
 
 **返回值**
@@ -642,15 +643,13 @@ Price(FixedArray(3.33, scale=2), quote_currency='USD', base_unit='share')
 >>> Price("10.00", "USD").divide(Quantity(2))
 Traceback (most recent call last):
     ...
-TypeError: 价格只能除以数值或同类
-Price，收到
-Quantity
+TypeError: 价格只能除以数值或同类 Price，收到 Quantity
 ```
 
 **另请参阅**
 
 - [`p / other`](#p--other真除法运算符)
-- [`_RATIO_EXTRA_DIGITS`](#_keep-与-_ratio_extra_digits)
+- [`FixedArray.divide`](fixed_array.md#fixedarraydivide)
 
 ## 规约、比较、导出与展示
 
@@ -892,22 +891,18 @@ FixedArray(0.01, scale=2)
 True
 ```
 
-### _KEEP 与 _RATIO_EXTRA_DIGITS
+### _KEEP
 
 ```python
 moneta.price._KEEP = object()
-moneta.price._RATIO_EXTRA_DIGITS = 8
 ```
 
-- **`_KEEP`**：模块内部唯一哨兵对象，用作 [`Price._create_like`](#price_create_like) 的 `tick_size` 默认参数值，以区分“沿用原实例的
-  `self._tick_size`”（`tick_size is _KEEP`）与“显式将新实例的 `tick_size` 设为 `None`”（`tick_size is None`）。
-- **`_RATIO_EXTRA_DIGITS = 8`**：当 [`Price.divide`](#pricedivide) 或 [`p / other`](#p--other真除法运算符) 未显式传入
-  `scale` 时，默认保留的小数位数为 `max(两侧 scale) + 8`。
+模块内部唯一哨兵对象，用作 [`Price._create_like`](#price_create_like) 的 `tick_size` 默认参数值，以区分“沿用原实例的 `self._tick_size`”（`tick_size is _KEEP`）与“显式将新实例的 `tick_size` 设为 `None`”（`tick_size is None`）。
 
 **示例**
 
 ```python
->>> from moneta.price import _KEEP, _RATIO_EXTRA_DIGITS
->>> _KEEP is not None and _RATIO_EXTRA_DIGITS == 8
+>>> from moneta.price import _KEEP
+>>> _KEEP is not None
 True
 ```

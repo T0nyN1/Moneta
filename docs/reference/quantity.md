@@ -48,8 +48,8 @@ Money(FixedArray(1895.00, scale=2), currency='USD')
 | `q * k`、`k * q`                                           | 无量纲数值                     | `Quantity`                     | `q.scale + k.scale`，**精确相乘不舍入**                                     |
 | `q.multiply(k, scale=None, rounding="half_up")`            | 无量纲数值                     | `Quantity`                     | `scale=None` 时精确；指定 `scale` 时按 `rounding` 一次性舍入到 `scale`      |
 | `q * price`、`price * q`                                   | 单位匹配的 [`Price`](price.md) | [`Money`](money.md)            | 委托 [`Price`](price.md) 计算，按计价币种精度得到 `Money`                   |
-| `q / k`、`q.divide(k, scale=None, rounding="half_up")`     | 无量纲数值                     | `Quantity`                     | 默认 `max(q.scale, k.scale) + 8`，可用 `scale` 指定并按 `rounding` 舍入     |
-| `q1 / q2`、`q1.divide(q2, scale=None, rounding="half_up")` | 同单位或 `"Any"` 的 `Quantity` | [`FixedArray`](fixed_array.md) | 单位相消得无量纲比率，默认 `max(q1.scale, q2.scale) + 8`，可用 `scale` 指定 |
+| `q / k`、`q.divide(k, scale=None, rounding="half_up")`     | 无量纲数值                     | `Quantity`                     | 默认 `max(q.scale, k.scale) + 8`（放不下 `int64` 时少保留，最后去末尾 0），可用 `scale` 指定并按 `rounding` 舍入 |
+| `q1 / q2`、`q1.divide(q2, scale=None, rounding="half_up")` | 同单位或 `"Any"` 的 `Quantity` | [`FixedArray`](fixed_array.md) | 单位相消得无量纲比率，默认 `max(q1.scale, q2.scale) + 8`（放不下 `int64` 时少保留，最后去末尾 0），可用 `scale` 指定 |
 | `q.rescale(scale, rounding="half_up")`                     | —                              | `Quantity`                     | 缩小 `scale` 时按 `rounding` 舍入（如取整股），扩大时补零                   |
 | `q.round_to_step(step, rounding="half_up")`                | 正数步长                       | `Quantity`                     | `max(q.scale, step.scale)`，按 `rounding` 对齐到步长网格（如整手 100 股）   |
 
@@ -88,7 +88,6 @@ Money(FixedArray(1895.00, scale=2), currency='USD')
 | **内部钩子与私有 API** | [`Quantity._create_like`](#quantity_create_like)                                                           | `UnitArray` 钩子：用新 `FixedArray` 与可选新单位构造 `Quantity`                              |
 |                        | [`Quantity._check_compatible`](#quantity_check_compatible)                                                 | `UnitArray` 钩子：校验另一对象是否为同单位或 `"Any"` 的 `Quantity`                           |
 |                        | [`Quantity._resolve_unit`](#quantity_resolve_unit)                                                         | 合并两个兼容 `Quantity` 的单位（优先取非 `"Any"` 的具体单位）                                |
-|                        | [`_RATIO_EXTRA_DIGITS`](#_ratio_extra_digits)                                                              | 除法未指定 `scale` 时相对两侧最大 `scale` 额外保留的小数位数（`8`）                          |
 
 ## 构造、常量与核心属性
 
@@ -488,8 +487,7 @@ Quantity(FixedArray(2, scale=0), unit='share')
 q / other
 ```
 
-将数量除以无量纲数值（返回同单位 `Quantity`）或除以兼容单位的 `Quantity`（单位相消返回无量纲比率 [
-`FixedArray`](fixed_array.md)），默认保留 `max(两侧 scale) + 8` 位小数并按 `half_up` 舍入。
+将数量除以无量纲数值（返回同单位 `Quantity`）或除以兼容单位的 `Quantity`（单位相消返回无量纲比率 [`FixedArray`](fixed_array.md)）。默认按 [`FixedArray.divide`](fixed_array.md#fixedarraydivide) 的自动精度规则保留 `max(两侧 scale) + 8` 位小数（放不下 `int64` 时少保留几位）、按 `half_up` 舍入并去掉末尾的 `0`（至少保留 `max(两侧 scale)` 位）。
 
 **参数**
 
@@ -512,12 +510,12 @@ q / other
 **示例**
 
 ```python
->>> Quantity(10, "share") / 4
-Quantity(FixedArray(2.50000000, scale=8), unit='share')
->>> Quantity(1, "barrel") / Quantity(3, "barrel")  # 同单位相消得 FixedArray 比率
+>>> Quantity(10, "share") / 4  # 整除：2.50000000 去掉末尾 0 -> scale=1
+Quantity(FixedArray(2.5, scale=1), unit='share')
+>>> Quantity(1, "barrel") / Quantity(3, "barrel")  # 除不尽：保留 0 + 8 = 8 位
 FixedArray(0.33333333, scale=8)
->>> Quantity(1, "Any") / Quantity(4, "barrel")
-FixedArray(0.25000000, scale=8)
+>>> Quantity(1, "Any") / Quantity(4, "barrel")  # 0.25000000 去掉末尾 0 -> scale=2
+FixedArray(0.25, scale=2)
 ```
 
 **性能对比**
@@ -543,8 +541,7 @@ Quantity.divide(other, scale=None, rounding="half_up")
 **参数**
 
 - **other** : *数值 array_like，或同单位/通配单位的 Quantity* — 除数。
-- **scale** : *int，可选* — 目标小数位数。默认 `None` 时取 `max(self.scale, other_scale) + 8`（见 [
-  `_RATIO_EXTRA_DIGITS`](#_ratio_extra_digits)）。
+- **scale** : *int，可选* — 目标小数位数。默认 `None` 时遵循 [`FixedArray.divide`](fixed_array.md#fixedarraydivide) 的自动精度规则（保留 `max(两侧 scale) + 8` 位，放不下 `int64` 时少保留，最后去掉末尾 `0`）。
 - **rounding** : *RoundingMode 或 str，默认 `"half_up"`* — 舍入模式。
 
 **返回值**
@@ -561,12 +558,9 @@ Quantity.divide(other, scale=None, rounding="half_up")
 
 **机制说明**
 
-1. 若 `isinstance(other, Quantity)`：调用 `self._check_compatible(other)` 校验单位兼容，计算
-   `target = max(self.scale, other.scale) + 8 if scale is None else scale`，返回
-   `self._data.divide(other._data, scale=target, rounding=mode)`（类型为 `FixedArray`）。
+1. 若 `isinstance(other, Quantity)`：调用 `self._check_compatible(other)` 校验单位兼容，直接返回 [`self._data.divide(other._data, scale=scale, rounding=mode)`](fixed_array.md#fixedarraydivide)（类型为 `FixedArray`）。
 2. 若 `isinstance(other, UnitArray)`（如 `Money`、[`Price`](price.md)）：直接抛出 `TypeError`。
-3. 否则通过 `self._as_factor(other, "除数")` 转为 `FixedArray`，计算
-   `target = max(self.scale, divisor.scale) + 8 if scale is None else scale`，返回包装后的同单位 `Quantity`。
+3. 否则通过 `self._as_factor(other, "除数")` 转为 `FixedArray`，调用 `self._data.divide(divisor, scale=scale, rounding=mode)` 并返回包装后的同单位 `Quantity`。
 
 **示例**
 
@@ -584,7 +578,6 @@ TypeError: 数量只能除以数值或同单位的 Quantity，收到 Money
 **另请参阅**
 
 - [`q / other`](#q--other真除法运算符)
-- [`_RATIO_EXTRA_DIGITS`](#_ratio_extra_digits)
 - [`FixedArray.divide`](fixed_array.md#fixedarraydivide)
 
 ## 显式取整与网格对齐
@@ -968,20 +961,3 @@ Quantity._resolve_unit(other)
 
 - [`WILDCARD_UNIT`](#wildcard_unit)
 - [`q1 + q2` 与 `q1 - q2`](#q1--q2-与-q1---q2同单位或通配单位加减法)
-
-### _RATIO_EXTRA_DIGITS
-
-```python
-moneta.quantity._RATIO_EXTRA_DIGITS = 8
-```
-
-模块级整数常量（值为 `8`）：当 [`Quantity.divide`](#quantitydivide) 或 [`q / other`](#q--other真除法运算符) 未显式指定
-`scale` 时，默认保留的小数位数为 `max(self.scale, other.scale) + _RATIO_EXTRA_DIGITS`。
-
-**示例**
-
-```python
->>> from moneta.quantity import _RATIO_EXTRA_DIGITS
->>> _RATIO_EXTRA_DIGITS
-8
-```

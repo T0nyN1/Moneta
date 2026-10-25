@@ -233,8 +233,9 @@ class TestMultiply:
 class TestDivide:
     def test_by_number(self):
         q = Quantity(10) / 4
-        assert q == Quantity("2.5") and q.scale == 8 and q.unit == "share"
-        assert (Quantity("1.5") / Decimal("0.25")).scale == 10  # max(1, 2) + 8
+        assert q == Quantity("2.5") and q.scale == 1 and q.unit == "share"  # 整除：去掉末尾的 0
+        assert (Quantity("1.5") / Decimal("0.25")).scale == 2  # 至少保留 max(1, 2) 位
+        assert Quantity(1) / 3 == Quantity("0.33333333") and (Quantity(10 ** 12) / 3).scale == 7  # 放不下时少保留
         assert Quantity(1).divide(3, scale=2, rounding="up") == Quantity("0.34")
         with pytest.raises(ZeroDivisionError):
             Quantity(1) / 0

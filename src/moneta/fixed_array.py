@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import math
 import warnings
 from decimal import Decimal
 from fractions import Fraction
@@ -21,6 +22,8 @@ from ._utils import max_abs, user_stacklevel
 _MAX = (1 << 63) - 1
 _MIN = -(1 << 63)
 _ON_EXCESS = ("raise", "warn")
+DIVISION_EXTRA_DIGITS = 8  # 不指定 scale 的除法：商在 max(两侧 scale) 之外最多再保留的小数位数
+_LOG10_MAX = math.log10(_MAX)
 
 
 class PrecisionLossWarning(UserWarning):
@@ -841,6 +844,63 @@ class FixedArray:
         return q_k + bump
 
     @staticmethod
+    def _auto_division_scale(num: np.ndarray, den: np.ndarray, num_scale: int, den_scale: int) -> int:
+        """不指定 scale 时商的小数位数：max(两侧 scale) + DIVISION_EXTRA_DIGITS；商在该精度下放不下 int64 时
+        逐位减少多出的小数位，最少保留 max(两侧 scale) 位（到这一步仍放不下，由除法本身报 OverflowError）。
+
+        先用 Python 整数按 max|被除数| / min|除数| 精确判定（几乎零开销）；只有它判定放不下时，
+        才逐元素用 float 估计商的上界（留 1e-9 的相对余量，足以覆盖 float 误差与舍入进位）。
+        """
+        base = max(num_scale, den_scale)
+        top = base + DIVISION_EXTRA_DIGITS
+        a = max_abs(num)
+        nonzero = den[den != 0]
+        if a == 0 or nonzero.size == 0:  # 商全为 0，或除零（由除法本身报错）
+            return top
+        b = min(abs(int(nonzero[nonzero > 0].min(initial=_MAX))), abs(int(nonzero[nonzero < 0].max(initial=_MIN))))
+        shift = top + den_scale - num_scale  # 商的尾数 ≈ |a|·10^shift / |b|
+        bound = a * 10 ** shift // b + 1 if shift >= 0 else a // (b * 10 ** -shift) + 1
+        if bound <= _MAX:
+            return top
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ratio = np.abs(num.astype(np.float64)) / np.abs(den.astype(np.float64))
+        largest = float(np.max(np.where(den != 0, ratio, 0.0)))
+        room = _LOG10_MAX - 1e-9 - math.log10(largest) - (den_scale - num_scale)  # 商最多还能保留的小数位数
+        return max(base, min(top, math.floor(room)))
+
+    def _squeeze_scale(self, min_scale: int) -> "FixedArray":
+        """去掉全体元素共同的末尾 0，至少保留 min_scale 位小数；数值不变（缺失位置尾数为 0，不影响判断）。
+
+        先试 1 位（除不尽的结果大多在这一步结束），再试一次去满，否则二分查找能去的位数。
+        """
+        room = self._scale - min_scale
+        if room <= 0:
+            return self
+        m = self._mantissa
+        if m.ndim == 0:
+            v, k = int(m), 0
+            if v == 0:
+                k = room
+            while k < room and v % 10 == 0:
+                v, k = v // 10, k + 1
+        else:
+            def divisible(digits: int) -> bool:
+                return not np.any(m % (10 ** digits))
+
+            if not divisible(1):
+                return self
+            if divisible(room):
+                k = room
+            else:
+                k, hi = 1, room - 1
+                while k < hi:
+                    mid = (k + hi + 1) // 2
+                    k, hi = (mid, hi) if divisible(mid) else (k, mid - 1)
+        if k == 0:
+            return self
+        return self._from_mantissa(m // 10 ** k, self._scale - k, mask=self._mask)
+
+    @staticmethod
     def _limbs_to_mantissa(limbs: Any, shift: int, mode: str) -> np.ndarray:
         """精确分块结果 → 目标 scale 的 int64 尾数：shift > 0 时在分块上除以 10^shift 并只舍入一次，
         shift ≤ 0 时先收口为 int64 再放大（溢出判断复用 _mul_pow10）。只有真实结果超出 int64 才报错。"""
@@ -1044,7 +1104,11 @@ class FixedArray:
         return other_fa.matmul(self, rounding=None)
 
     def divide(self, other: Any, scale: Optional[int] = None, rounding: str = "half_up", ) -> "FixedArray":
-        """定点数除法：商保留 scale 位小数（默认 ``max(self.scale, other.scale)``），按 rounding 取整。
+        """定点数除法：商保留 scale 位小数，按 rounding 取整。
+
+        不指定 scale 时：先保留 ``max(self.scale, other.scale) + DIVISION_EXTRA_DIGITS``（8）位，商在该精度下放不下
+        int64 时少保留几位（最少 max(两侧 scale) 位），最后去掉末尾的 0（同样至少保留 max(两侧 scale) 位）。
+        因此能整除时结果没有多余的 0（189.50 / 2 → 94.75），除不尽时多保留 8 位（1 / 3 → 0.33333333）。
 
         全程 int64：商的小数位数比自然精度多时走分段长除法（大除数自动切换至二进制倍增内核）；
         比自然精度少时对整数商与余数直接除以 10 的幂舍入，只有最终商超出 int64 才报错。
@@ -1054,7 +1118,7 @@ class FixedArray:
         other : FixedArray 或可构造 FixedArray 的值
             除数，可广播。
         scale : int，可选
-            商的小数位数，默认 ``max(self.scale, other.scale)``。
+            商的小数位数；默认按上面的规则自动确定。
         rounding : {"half_up", "half_even", "down", "up", "floor", "ceil"} 或 RoundingMode，默认 "half_up"
             取整方式。
 
@@ -1065,16 +1129,17 @@ class FixedArray:
         ZeroDivisionError
             除数含 0。
         OverflowError
-            结果超出 int64 范围。
+            结果超出 int64 范围（不指定 scale 时：保留 max(两侧 scale) 位也放不下）。
         """
         mode = check_rounding(rounding)
         other = self._coerce(other)
-        target = max(self._scale, other._scale) if scale is None else self._check_scale(scale)
         out_mask = self._combine_masks(self._mask, other._mask)
         num, den = self._mantissa, other._mantissa
         if out_mask is not None:
             num = np.where(out_mask, np.int64(0), num)
             den = np.where(out_mask, np.int64(1), den)
+        auto = scale is None
+        target = self._auto_division_scale(num, den, self._scale, other._scale) if auto else self._check_scale(scale)
         # 商的尾数 = round(a·10^(target + other.scale - self.scale) / b)
         shift = target + other._scale - self._scale
         if shift > 0:
@@ -1094,10 +1159,11 @@ class FixedArray:
                 # round(x / -1) = -round'(x)，round' 为 floor 与 ceil 互换后的模式（其余模式关于 0 对称）
                 mirrored = {"floor": "ceil", "ceil": "floor"}.get(mode, mode)
                 quotient = np.where(special, -self._round_div_pow10(num, 0, 1, k, mirrored), quotient)
-        return self._from_mantissa(quotient, target, mask=out_mask)
+        result = self._from_mantissa(quotient, target, mask=out_mask)
+        return result._squeeze_scale(max(self._scale, other._scale)) if auto else result
 
     def __truediv__(self, other: Any) -> "FixedArray":
-        """真除法：默认保留 max(self.scale, other.scale) 位商精度，half_up 舍入。"""
+        """真除法：同不指定 scale 的 divide（max(两侧 scale) + 8 位、放不下时少保留、去掉末尾的 0），half_up 舍入。"""
         other_fa = self._coerce(other, strict=False)
         if other_fa is None:
             return NotImplemented
@@ -1775,4 +1841,4 @@ class FixedArray:
 
 _NUMPY_DISPATCHED = frozenset({np.sum, np.mean, np.transpose, np.shape, np.ndim, np.size})
 
-__all__ = ["FixedArray", "PrecisionLossWarning", "RoundingMode"]
+__all__ = ["DIVISION_EXTRA_DIGITS", "FixedArray", "PrecisionLossWarning", "RoundingMode"]

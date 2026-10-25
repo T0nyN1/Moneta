@@ -6,7 +6,7 @@
 约定：
 - 数量没有固定精度：运算精确，乘法结果的 scale 为两侧之和；需要取整到整股、整手时显式调用
   multiply(scale=...)、rescale 或 round_to_step。
-- 除以数值或同单位数量时，默认保留 max(两侧 scale) + 8 位小数，可用 scale 指定。
+- 除以数值或同单位数量时按 FixedArray.divide 的默认精度：默认保留 max(两侧 scale) + 8 位小数（商放不下 int64 时少保留几位），并去掉末尾的 0；可用 scale 指定。
 - 构造时指定 scale：float 按最短写法 half_up 舍入；精确输入超出 scale 时由 FixedArray 发出 PrecisionLossWarning 后舍入。
 - 运算只接受数值白名单内的操作数，拒绝字符串；运算符遇到不认识的类型返回 NotImplemented。
 """
@@ -22,7 +22,6 @@ from ._units import WILDCARD_UNIT, check_unit, units_compatible
 from .fixed_array import FixedArray, RoundingMode
 from .unit_array import UnitArray
 
-_RATIO_EXTRA_DIGITS = 8  # 除法结果相对两侧 scale 额外保留的小数位数
 
 Rounding = Union[RoundingMode, str]
 
@@ -114,18 +113,16 @@ class Quantity(UnitArray):
         """数量除法：
         - Quantity / 无量纲数值 → Quantity；
         - Quantity / 同单位（或通配单位）Quantity → 无量纲比率 FixedArray。
-        默认保留 max(两侧 scale) + 8 位小数，可用 scale 指定；按 rounding 舍入。
+        默认保留 max(两侧 scale) + 8 位小数（商放不下 int64 时少保留几位），并去掉末尾的 0；可用 scale 指定；按 rounding 舍入。
         """
         mode = check_rounding(rounding)
         if isinstance(other, Quantity):
             self._check_compatible(other)
-            target = max(self.scale, other.scale) + _RATIO_EXTRA_DIGITS if scale is None else scale
-            return self._data.divide(other._data, scale=target, rounding=mode)
+            return self._data.divide(other._data, scale=scale, rounding=mode)
         if isinstance(other, UnitArray):
             raise TypeError(f"数量只能除以数值或同单位的 Quantity，收到 {type(other).__name__}")
         divisor = self._as_factor(other, "除数")
-        target = max(self.scale, divisor.scale) + _RATIO_EXTRA_DIGITS if scale is None else scale
-        return self._create_like(self._data.divide(divisor, scale=target, rounding=mode))
+        return self._create_like(self._data.divide(divisor, scale=scale, rounding=mode))
 
     def __mul__(self, other: Any) -> "Quantity":
         """Quantity * 数值 → 精确的 Quantity；Quantity * Price 交给 Price 计算（结果为 Money）；其他返回 NotImplemented。"""
