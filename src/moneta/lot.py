@@ -245,21 +245,16 @@ class PositionLot:
 
 
 def _convert_at_rate(money: Money, rate: Any, target: Currency) -> Money:
-    """按 money 与 target 两种货币之间的 ExchangeRate（任一方向）把金额换算为 target，只舍入一次。
+    """用 money 与 target 两种货币之间的 ExchangeRate（任一方向）把金额换算为 target。
 
-    正方向乘以中间价、反方向直接除以中间价（不经过 inverse 的二次舍入），缺失值保持为缺失值。
+    换算本身由 ExchangeRate.convert 完成（中间价、只舍入一次、保留缺失值）；这里只校验汇率存在且货币对正确。
     """
     if rate is None:
         raise ValueError(f"需要 {money.currency.code}/{target.code} 的汇率 fx 才能换算为 {target.code}")
-    pair = (rate.base_currency, rate.quote_currency)
-    if pair == (money.currency, target):
-        converted = money.data.mul_round(rate.rate, scale=target.digits)
-    elif pair == (target, money.currency):
-        converted = money.data.divide(rate.rate, scale=target.digits)
-    else:
+    if {rate.base_currency, rate.quote_currency} != {money.currency, target}:
         raise TypeError(f"汇率 {rate.base_currency.code}/{rate.quote_currency.code} 与 "
                         f"{money.currency.code}/{target.code} 不匹配")
-    return Money._wrap(converted, target)
+    return rate.convert(money)
 
 
 def match_lots(lots: Sequence[PositionLot], amount: Amount,

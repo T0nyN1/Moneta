@@ -21,8 +21,12 @@ from moneta.lot import LotMatchingRule, PositionLot
 AAPL = Instrument("AAPL", "USD")
 CL = Instrument("CL", "USD", base_unit="barrel", multiplier=1000)
 TENCENT = Instrument("0700", "HKD")
-USDCNY_7 = ExchangeRate("7.0", "USD", "CNY")
-ENGINE = FXEngine(UserDictFXProvider({"USD/CNY": "7.2", "EUR/USD": "1.1"}))
+USDCNY_7 = ExchangeRate("USD", "CNY", "7.0")
+# 不带日期的汇率用于不传日期的估值；入账 / 出账按交易日严格匹配，需要当天的汇率
+ENGINE = FXEngine(UserDictFXProvider({
+    "USD/CNY": "7.2", "EUR/USD": "1.1",
+    **{day: {"USD/CNY": "7.2", "EUR/USD": "1.1"} for day in ("2024-01-02", "2024-02-01", "2024-03-01")},
+}))
 
 
 def cny(v):
@@ -38,7 +42,7 @@ def sample():
     p = Portfolio("CNY")
     p.deposit("CNY", 1000, "2024-01-01")
     p.deposit(AAPL, 100, "2024-01-02", price="100", fx=USDCNY_7)
-    p.deposit(USD, usd(50), "2024-01-03", fx=ExchangeRate("7.1", "USD", "CNY"))
+    p.deposit(USD, usd(50), "2024-01-03", fx=ExchangeRate("USD", "CNY", "7.1"))
     return p
 
 
@@ -81,7 +85,7 @@ class TestQueries:
         with pytest.raises(ValueError, match="price 或 cost"):
             p.deposit("CAD", 5, "2024-01-02")  # 字符串先匹配已持有的资产：这里是股票 CAD，不会悄悄当成现金
         from moneta.currency import CAD
-        p.deposit(CAD, 5, "2024-01-02", fx=ExchangeRate("0.75", "CAD", "USD"))
+        p.deposit(CAD, 5, "2024-01-02", fx=ExchangeRate("CAD", "USD", "0.75"))
         with pytest.raises(KeyError, match="多个持仓"):
             p["CAD"]  # 同一代码既是现金又是标的：必须用对象区分
         assert p.position(CAD) == Money(5, "CAD") and p.position(cad_stock) == Quantity(3)
@@ -90,7 +94,7 @@ class TestQueries:
         p = Portfolio("USD")
         a_usd, a_cny = Instrument("A", "USD"), Instrument("A", "CNY")
         p.deposit(a_usd, 1, "2024-01-02", price=1)
-        p.deposit(a_cny, 2, "2024-01-02", price=1, fx=ExchangeRate("0.14", "CNY", "USD"))
+        p.deposit(a_cny, 2, "2024-01-02", price=1, fx=ExchangeRate("CNY", "USD", "0.14"))
         assert len(p) == 2 and p.position(a_usd) == Quantity(1) and p.position(a_cny) == Quantity(2)
 
     def test_lots_are_copies(self):
@@ -110,7 +114,7 @@ class TestDeposit:
         p = Portfolio("CNY")
         lot = p.deposit(CNY, cny("100.50"), date(2024, 1, 1), label="init")
         assert lot.cost_base == cny("100.50") and lot.label == "init" and p.lots(CNY) == [lot]
-        eur = p.deposit("EUR", 100, "2024-01-02", fx=ExchangeRate("7.8", "EUR", "CNY"))
+        eur = p.deposit("EUR", 100, "2024-01-02", fx=ExchangeRate("EUR", "CNY", "7.8"))
         assert eur.cost_base == cny(780) and p["EUR"] == Money(100, "EUR")
         assert p.deposit("EUR", 10, "2024-01-03", cost_base=cny("79")).cost_base == cny(79)  # 直接给基准货币成本
         assert p["EUR"] == Money(110, "EUR") and len(p.lots(EUR)) == 2
@@ -133,7 +137,7 @@ class TestDeposit:
         with pytest.raises(ValueError, match="需要 EUR/CNY 的汇率"):
             p.deposit(EUR, 1, "2024-01-02")
         with pytest.raises(TypeError, match="不匹配"):
-            p.deposit(AAPL, 1, "2024-01-02", price=100, fx=ExchangeRate("1.1", "EUR", "USD"))
+            p.deposit(AAPL, 1, "2024-01-02", price=100, fx=ExchangeRate("EUR", "USD", "1.1"))
         assert len(p) == 0  # 失败时不会留下半截状态
 
     def test_validation(self):
@@ -183,7 +187,7 @@ class TestWithdraw:
     ])
     def test_rules_and_realized_pnl(self, rule, cost_base, left):
         p = self.portfolio()
-        closed, realized = p.withdraw(AAPL, 15, "2024-03-01", price=130, fx=ExchangeRate("7.2", "USD", "CNY"), rule=rule)
+        closed, realized = p.withdraw(AAPL, 15, "2024-03-01", price=130, fx=ExchangeRate("USD", "CNY", "7.2"), rule=rule)
         assert sum((lot.cost_base for lot in closed), cny(0)) == cny(cost_base)
         assert realized == cny(15 * 130 * Decimal("7.2")) - cny(cost_base)
         assert [(lot.amount, lot.cost_base) for lot in p.lots(AAPL)] == [(Quantity(q), cny(c)) for q, c in left]
@@ -300,11 +304,11 @@ class TestRebalance:
     def test_rate_in_either_direction(self):
         p = Portfolio("CNY")
         p.deposit(CNY, 8000, "2024-01-01")
-        for rate in (ExchangeRate("8", "USD", "CNY"), ExchangeRate("0.125", "CNY", "USD")):
+        for rate in (ExchangeRate("USD", "CNY", "8"), ExchangeRate("CNY", "USD", "0.125")):
             got = p.rebalance({CNY: Decimal("0.5"), USD: Decimal("0.25"), AAPL: Decimal("0.25")}, {AAPL: 50}, rate)
             assert got == {CNY: cny(-4000), USD: usd(250), AAPL: Quantity(5)}  # 2000 CNY = 250 USD = 5 股
         with pytest.raises(TypeError, match="不匹配"):
-            p.rebalance({CNY: Decimal("0.5"), AAPL: Decimal("0.5")}, {AAPL: 50}, ExchangeRate("1.1", "EUR", "USD"))
+            p.rebalance({CNY: Decimal("0.5"), AAPL: Decimal("0.5")}, {AAPL: 50}, ExchangeRate("EUR", "USD", "1.1"))
 
     def test_single_currency(self):
         p = Portfolio("USD")

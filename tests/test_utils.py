@@ -34,6 +34,8 @@ class TestToDate:
         assert to_date(d) is d
         assert to_date(datetime(2024, 1, 2, 15, 30)) == d and type(to_date(datetime(2024, 1, 2))) is date
         assert to_date("2024-01-02") == d and to_date("  2024-01-02\t") == d
+        assert to_date(None, optional=True) is None
+        assert to_date("2024-01-02", optional=True) == d
 
     @pytest.mark.parametrize("bad", ["2024-13-01", "2024-02-30", "invalid-date", "", "2024/01/02"])
     def test_invalid_text(self, bad):
@@ -52,6 +54,12 @@ class TestToDate:
             to_date(None, "as_of_date")
         with pytest.raises(TypeError, match="^日期 必须是"):  # 默认标签
             to_date(None)
+
+    def test_optional_only_allows_none(self):
+        with pytest.raises(ValueError, match="^as_of_date 不是合法的 ISO 日期"):
+            to_date("2024-02-30", "as_of_date", optional=True)
+        with pytest.raises(TypeError, match="^as_of_date 必须是"):
+            to_date(20240102, "as_of_date", optional=True)
 
 
 class TestIsLeapYear:

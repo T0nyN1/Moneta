@@ -12,7 +12,7 @@
 >>> lot = PositionLot(aapl, Quantity(10), "2024-01-02", cost=Money("1800.00", "USD"), cost_base=Money("12600.00", "CNY"), label="B-01")
 >>> lot.asset is aapl, lot.is_cash, lot.base_currency is CNY, lot.holding_days("2024-03-02")
 (True, False, True, 60)
->>> fx_now = ExchangeRate("7.20", "USD", "CNY")
+>>> fx_now = ExchangeRate("USD", "CNY", "7.20")
 >>> lot.market_value(Price("200.00", "USD"), fx=fx_now), lot.pnl(Price("200.00", "USD"), fx=fx_now)
 (Money(FixedArray(14400.00, scale=2), currency='CNY'), Money(FixedArray(1800.00, scale=2), currency='CNY'))
 >>> part, rest = lot.split(Quantity(3))  # 按 3:7 比例守恒拆分成本
@@ -562,9 +562,9 @@ PositionLot.market_value(price=None, fx=None)
 >>> lot_usd.market_value(Price("195.50", "USD")), lot_usd.market_value("195.50")
 (Money(FixedArray(1955.00, scale=2), currency='USD'), Money(FixedArray(1955.00, scale=2), currency='USD'))
 >>> lot_cny = PositionLot(aapl, Quantity(10), "2024-01-02", cost=Money("1000", "USD"), cost_base=Money("7000", "CNY"))
->>> lot_cny.market_value(Decimal("100.01"), fx=ExchangeRate("0.3", "CNY", "USD"))  # 反向汇率直接除一次：1000.10 / 0.3 = 3333.67 CNY
+>>> lot_cny.market_value(Decimal("100.01"), fx=ExchangeRate("CNY", "USD", "0.3"))  # 反向汇率直接除一次：1000.10 / 0.3 = 3333.67 CNY
 Money(FixedArray(3333.67, scale=2), currency='CNY')
->>> lot_cny.market_value(Price(None, "USD"), fx=ExchangeRate("7.2", "USD", "CNY"))  # 缺失市价保持为 <NA>
+>>> lot_cny.market_value(Price(None, "USD"), fx=ExchangeRate("USD", "CNY", "7.2"))  # 缺失市价保持为 <NA>
 Money(FixedArray(<NA>, scale=2), currency='CNY')
 ```
 
@@ -606,7 +606,7 @@ $$\text{PnL} = \text{market\_value}(\text{price}, \text{fx}) - \text{cost\_base}
 >>> lot.profit_loss("81.5"), lot.pnl("79")
 (Money(FixedArray(3000.00, scale=2), currency='USD'), Money(FixedArray(-2000.00, scale=2), currency='USD'))
 >>> eur_cash = PositionLot(EUR, Money("100", "EUR"), "2024-01-02", cost_base=Money("108.00", "USD"))
->>> eur_cash.pnl(fx=ExchangeRate("1.10", "EUR", "USD"))
+>>> eur_cash.pnl(fx=ExchangeRate("EUR", "USD", "1.10"))
 Money(FixedArray(2.00, scale=2), currency='USD')
 ```
 
@@ -646,7 +646,7 @@ $$r = \frac{\text{profit\_loss}(\text{price}, \text{fx})}{\text{cost\_base}}$$
 >>> PositionLot(aapl, Quantity(10), "2024-01-02", cost=Money("1000", "USD")).return_rate(110)  # 整除：去末尾 0 保留 2 位
 FixedArray(0.10, scale=2)
 >>> lot = PositionLot(aapl, Quantity(10), "2024-01-02", cost=Money("1000", "USD"), cost_base=Money("7000", "CNY"))
->>> lot.return_rate(100, fx=ExchangeRate("7.2", "USD", "CNY"))  # 除不尽：(7200 - 7000) / 7000 保留 2 + 8 = 10 位
+>>> lot.return_rate(100, fx=ExchangeRate("USD", "CNY", "7.2"))  # 除不尽：(7200 - 7000) / 7000 保留 2 + 8 = 10 位
 FixedArray(0.0285714286, scale=10)
 >>> gift = PositionLot(aapl, Quantity(1), "2024-01-02", cost=Money(0, "USD"))
 >>> gift.return_rate(100)
@@ -853,7 +853,7 @@ Quantity(FixedArray(2, scale=0), unit='barrel')
 moneta.lot._convert_at_rate(money, rate, target)
 ```
 
-用 `money.currency` 与目标币种 `target` 之间的 `ExchangeRate`（任一方向）将金额 `money` 换算为 `target` 币种，全程**只舍入一次**，且缺失值 `<NA>` 保持为缺失值。同时供 [`PositionLot.market_value`](#positionlotmarket_value) 与 [`Portfolio`](portfolio.md) 复用。
+用 `money.currency` 与目标币种 `target` 之间的 [`ExchangeRate`](fx.md#exchangeratebase_currency-quote_currency-rate--bidnone-asknone-as_of_datenone)（任一方向）将金额 `money` 换算为 `target` 币种，全程**只舍入一次**，且缺失值 `<NA>` 保持为缺失值。同时供 [`PositionLot.market_value`](#positionlotmarket_value) 与 [`Portfolio`](portfolio.md) 复用。
 
 **参数**
 
@@ -868,16 +868,13 @@ moneta.lot._convert_at_rate(money, rate, target)
 **异常**
 
 - **ValueError** — `rate is None`（报 `f"需要 {money.currency.code}/{target.code} 的汇率 fx 才能换算为 {target.code}"`）。
-- **TypeError** — `rate` 的 `(base_currency, quote_currency)` 既不是 `(money.currency, target)` 也不是 `(target, money.currency)`。
+- **TypeError** — `{rate.base_currency, rate.quote_currency} != {money.currency, target}`（汇率的货币对与待换算金额及目标币种组成的集合不匹配）。
 
 **机制说明**
 
 1. 若 `rate is None` 立即抛出 `ValueError`；
-2. 记 `pair = (rate.base_currency, rate.quote_currency)`：
-   - **正向汇率** `pair == (money.currency, target)`：调用 `money.data.mul_round(rate.rate, scale=target.digits)` 乘以中间价一次舍入；
-   - **反向汇率** `pair == (target, money.currency)`：直接调用 `money.data.divide(rate.rate, scale=target.digits)` 除以中间价一次舍入（不经过 `rate.inverse()` 的二次舍入）；
-   - 其他货币对：抛出 `TypeError`；
-3. 调用 [`Money._wrap(converted, target)`](money.md#money_wrap) 零拷贝封装返回。
+2. 若 `{rate.base_currency, rate.quote_currency} != {money.currency, target}`，抛出 `TypeError`；
+3. 返回 [`rate.convert(money)`](fx.md#exchangerateconvert)，即用中间价（`side="mid"`）、按 `half_up` 舍入：正方向乘、反方向直接除，全程只舍入一次，缺失值 `<NA>` 保持缺失。
 
 **示例**
 
@@ -885,23 +882,25 @@ moneta.lot._convert_at_rate(money, rate, target)
 >>> from moneta import Money, CNY, USD
 >>> from moneta.fx import ExchangeRate
 >>> from moneta.lot import _convert_at_rate
->>> _convert_at_rate(Money("100.00", "USD"), ExchangeRate("7.20", "USD", "CNY"), CNY)
+>>> _convert_at_rate(Money("100.00", "USD"), ExchangeRate("USD", "CNY", "7.20"), CNY)
 Money(FixedArray(720.00, scale=2), currency='CNY')
->>> _convert_at_rate(Money("1000.10", "USD"), ExchangeRate("0.3", "CNY", "USD"), CNY)  # 反向汇率直接除一次
+>>> _convert_at_rate(Money("1000.10", "USD"), ExchangeRate("CNY", "USD", "0.3"), CNY)  # 反向汇率直接除一次
 Money(FixedArray(3333.67, scale=2), currency='CNY')
->>> _convert_at_rate(Money([None, "100.00"], "USD"), ExchangeRate("7.20", "USD", "CNY"), CNY)
+>>> _convert_at_rate(Money([None, "100.00"], "USD"), ExchangeRate("USD", "CNY", "7.20"), CNY)
 Money(FixedArray([<NA>, 720.00], scale=2), currency='CNY')
 >>> _convert_at_rate(Money("100.00", "USD"), None, CNY)
 Traceback (most recent call last):
     ...
 ValueError: 需要 USD/CNY 的汇率 fx 才能换算为 CNY
->>> _convert_at_rate(Money("100.00", "USD"), ExchangeRate("1.10", "EUR", "USD"), CNY)
+>>> _convert_at_rate(Money("100.00", "USD"), ExchangeRate("EUR", "USD", "1.10"), CNY)
 Traceback (most recent call last):
     ...
 TypeError: 汇率 EUR/USD 与 USD/CNY 不匹配
 ```
 
 **另请参阅**
+
+- [`ExchangeRate.convert`](fx.md#exchangerateconvert)
 
 - [`PositionLot.market_value`](#positionlotmarket_value)
 

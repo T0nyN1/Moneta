@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import sys
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Literal, Optional, overload
 
 import numpy as np
 
@@ -17,8 +17,21 @@ def max_abs(x: np.ndarray) -> int:
     return max(-int(x.min()), int(x.max())) if x.size else 0
 
 
-def to_date(value: Any, what: str = "日期") -> date:
-    """将 date、datetime 或 ISO 格式日期字符串解析为标准 date 对象。"""
+@overload
+def to_date(value: Any, what: str = ..., optional: Literal[False] = ...) -> date: ...
+
+
+@overload
+def to_date(value: Any, what: str = ..., optional: bool = ...) -> Optional[date]: ...
+
+
+def to_date(value: Any, what: str = "日期", optional: bool = False) -> Optional[date]:
+    """将 date、datetime 或 ISO 格式日期字符串解析为标准 date 对象。
+
+    optional=True 时 None 返回 None；optional=False 时 None 抛出 TypeError。
+    """
+    if value is None and optional:
+        return None
     if isinstance(value, datetime):
         return value.date()
     if isinstance(value, date):

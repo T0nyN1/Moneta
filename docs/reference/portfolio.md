@@ -15,11 +15,11 @@
 >>> aapl = Instrument("AAPL", "USD")
 >>> p = Portfolio("CNY")
 >>> _ = p.deposit("CNY", 1000, "2024-01-01")
->>> _ = p.deposit(aapl, 100, "2024-01-02", price="100", fx=ExchangeRate("7.0", "USD", "CNY"))
->>> _ = p.deposit(USD, Money(50, "USD"), "2024-01-03", fx=ExchangeRate("7.1", "USD", "CNY"))
+>>> _ = p.deposit(aapl, 100, "2024-01-02", price="100", fx=ExchangeRate("USD", "CNY", "7.0"))
+>>> _ = p.deposit(USD, Money(50, "USD"), "2024-01-03", fx=ExchangeRate("USD", "CNY", "7.1"))
 >>> p["CNY"], p["AAPL"], p[USD], len(p)
 (Money(FixedArray(1000.00, scale=2), currency='CNY'), Quantity(FixedArray(100, scale=0), unit='share'), Money(FixedArray(50.00, scale=2), currency='USD'), 3)
->>> engine = FXEngine(UserDictFXProvider({"USD/CNY": "7.2"}))
+>>> engine = FXEngine(UserDictFXProvider({"USD/CNY": "7.2", "2024-03-01": {"USD/CNY": "7.2"}}))
 >>> p.total_cost(), p.total_value({"AAPL": 120}, fx=engine), p.unrealized_pnl({"AAPL": 120}, fx=engine)
 (Money(FixedArray(71355.00, scale=2), currency='CNY'), Money(FixedArray(87760.00, scale=2), currency='CNY'), Money(FixedArray(16405.00, scale=2), currency='CNY'))
 >>> closed, realized = p.withdraw(aapl, 40, "2024-03-01", price=130, fx=engine, rule=LotMatchingRule.FIFO)
@@ -47,8 +47,8 @@
 
 - **基准货币必填**：构造 `Portfolio(base_currency)` 必须显式指定组合记账基准货币（`Currency` 或代码字符串），所有加入组合的 [`PositionLot`](lot.md) 的 `base_currency` 必须与之一致。
 - **零隐式换汇**：涉及非基准货币资产的入账折算、平仓盈亏、盯市估值与再平衡，均须通过 `fx` 参数显式提供汇率（不提供时直接抛出 `ValueError`，绝不静默使用历史成本汇率或按 `1:1` 换算）：
-  - 当 `fx` 为 `ExchangeRate` 时：支持正向或反向货币对，底层统一经由 [`_convert_at_rate`](lot.md#_convert_at_rate) 单次舍入；
-  - 当 `fx` 为 `FXEngine`（即具有 `get_rate` 方法的对象）时：[`_rate`](#portfolio_rateportfolio_base_to_localportfolio_to_base-与-portfolio_sum) 自动将 `acquired_date`、`trade_date` 或 `as_of_date` 归一化为 `datetime.date` 后调用 `fx.get_rate(currency, self.base_currency, as_of_date=when)` 获取对应日期的历史或估值汇率。
+  - 当 `fx` 为 [`ExchangeRate`](fx.md#exchangeratebase_currency-quote_currency-rate--bidnone-asknone-as_of_datenone) 时：支持正向或反向货币对，底层统一经由 [`_convert_at_rate`](lot.md#_convert_at_rate) 单次舍入；
+  - 当 `fx` 为 [`FXEngine`](fx.md#fxengineprovider-base_anchor_currencyusd)（即具有 `get_rate` 方法的对象）时：[`_rate`](#portfolio_rateportfolio_base_to_localportfolio_to_base-与-portfolio_sum) 自动将 `acquired_date`、`trade_date` 或 `as_of_date` 归一化为 `datetime.date`（或 `None`）后调用 `fx.get_rate(currency, self.base_currency, as_of_date=when)` 获取对应汇率。汇率严格按日期匹配：传入日期时只使用当天的汇率，不传时只使用不带日期的汇率，查不到抛 [`ExchangeRateNotFoundError`](fx.md#exchangeratenotfounderror)；不会沿用前一天的汇率。
 
 ### 3. 入账（`deposit`）与出账（`withdraw`）行为矩阵
 
@@ -177,8 +177,8 @@ Portfolio.assets
 >>> aapl = Instrument("AAPL", "USD")
 >>> p = Portfolio("CNY")
 >>> _ = p.deposit("CNY", 1000, "2024-01-01")
->>> _ = p.deposit(aapl, 10, "2024-01-02", price=180, fx=ExchangeRate("7.0", "USD", "CNY"))
->>> _ = p.deposit(USD, 50, "2024-01-03", fx=ExchangeRate("7.1", "USD", "CNY"))
+>>> _ = p.deposit(aapl, 10, "2024-01-02", price=180, fx=ExchangeRate("USD", "CNY", "7.0"))
+>>> _ = p.deposit(USD, 50, "2024-01-03", fx=ExchangeRate("USD", "CNY", "7.1"))
 >>> p.assets == [CNY, aapl, USD]
 True
 ```
@@ -401,7 +401,7 @@ Portfolio.deposit(
 
 - **asset** : *Currency, Instrument 或 str* — 入账资产（现金可传 `Currency` 或已注册货币代码字符串；证券须传 `Instrument`，若已持有该证券也可传标的代码字符串）。
 - **amount** : *Money, Quantity 或 数值/字符串* — 入账正数标量数量（现金可传同币种 `Money` 或数值/字符串；证券可传兼容单位的 `Quantity` 或按 `asset.base_unit` 解释的数值/字符串）。
-- **acquired_date** : *date, datetime 或 str* — 买入或入账日期（当 `fx` 为 `FXEngine` 时，同时作为查询入账日历史汇率的日期）。
+- **acquired_date** : *date, datetime 或 str* — 买入或入账日期（当 `fx` 为 `FXEngine` 时，同时作为查询入账日历史汇率的日期，须有当天汇率）。
 - **price** : *Price 或 数值/字符串，仅关键字参数，可选* — 证券买入成交单价（与 `cost` 二选一必填；现金禁止传入）。传入时计价货币成本通过 [`asset.calc_notional(price, amount)`](instrument.md#instrumentcalc_notional) 单次舍入计算（自动计入合约乘数 `multiplier`）。
 - **cost** : *Money，仅关键字参数，可选* — 证券的计价货币总成本（与 `price` 二选一必填，适用于需将买入手续费计入成本基数的场景；现金禁止传入）。
 - **cost_base** : *Money，仅关键字参数，可选* — 组合基准货币表示的总成本。省略时：若计价货币就是 `self.base_currency`，自动等于计价成本；否则通过 `fx` 在 `acquired_date` 的汇率将计价成本单次舍入换算为 `self.base_currency`。
@@ -427,7 +427,7 @@ Portfolio.deposit(
 >>> from moneta.fx import ExchangeRate, FXEngine, UserDictFXProvider
 >>> aapl = Instrument("AAPL", "USD")
 >>> cl = Instrument("CL", "USD", base_unit="barrel", multiplier=1000)
->>> engine = FXEngine(UserDictFXProvider({"USD/CNY": "7.2", "EUR/CNY": "7.8"}))
+>>> engine = FXEngine(UserDictFXProvider({"USD/CNY": "7.2", "EUR/CNY": "7.8", "2024-01-02": {"USD/CNY": "7.2", "EUR/CNY": "7.8"}}))
 >>> pf = Portfolio("CNY")
 >>> l_cash = pf.deposit("EUR", 100, "2024-01-02", fx=engine, label="FX-01")
 >>> (l_cash.cost, l_cash.cost_base, pf[EUR])
@@ -465,7 +465,7 @@ Portfolio.withdraw(
 
 - **asset** : *Currency, Instrument 或 str* — 待扣减的已持有资产。
 - **amount** : *Money, Quantity 或 数值/字符串* — 扣减的正数标量数量（不得超过当前持仓总量 `self.position(asset)`）。
-- **trade_date** : *date, datetime 或 str* — 平仓/出账日期（必填，通过 [`to_date(trade_date, "trade_date")`](_utils.md#to_date) 校验；当 `fx` 为 `FXEngine` 时按该日期取汇率）。
+- **trade_date** : *date, datetime 或 str* — 平仓/出账日期（必填，通过 [`to_date(trade_date, "trade_date")`](_utils.md#to_date) 校验；当 `fx` 为 `FXEngine` 时按该日期取汇率，须有当天汇率）。
 - **price** : *Price 或 数值/字符串，仅关键字参数，可选* — 证券卖出成交单价。给出时计算已实现盈亏 `realized`；省略（`price=None`）时视为非交易转出，已实现盈亏返回 `None`。现金批次不接受 `price`。
 - **fx** : *ExchangeRate 或 FXEngine，仅关键字参数，可选* — 当计价货币不等于 `self.base_currency` 时：
   - 证券给出了 `price`：必须传入 `fx` 以折算基准货币已实现盈亏（漏传 `fx` 会抛出 `ValueError`）；
@@ -494,10 +494,10 @@ Portfolio.withdraw(
 >>> aapl = Instrument("AAPL", "USD")
 >>> def make_pf():
 ...     pf = Portfolio("CNY")
-...     pf.deposit(aapl, 10, "2024-01-01", price=100, fx=ExchangeRate("7.0", "USD", "CNY"))
-...     pf.deposit(aapl, 10, "2024-02-01", price=120, fx=ExchangeRate("7.0", "USD", "CNY"))
+...     pf.deposit(aapl, 10, "2024-01-01", price=100, fx=ExchangeRate("USD", "CNY", "7.0"))
+...     pf.deposit(aapl, 10, "2024-02-01", price=120, fx=ExchangeRate("USD", "CNY", "7.0"))
 ...     return pf
->>> fx_sell = ExchangeRate("7.2", "USD", "CNY")
+>>> fx_sell = ExchangeRate("USD", "CNY", "7.2")
 >>> # FIFO 卖出 15 股（成交价 $130，汇率 7.2）：收入 15×130×7.2 = 14040 CNY，成本 7000 + 4200 = 11200 CNY -> 盈亏 +2840 CNY
 >>> closed_f, pnl_f = make_pf().withdraw(aapl, 15, "2024-03-01", price=130, fx=fx_sell, rule=LotMatchingRule.FIFO)
 >>> pnl_f, [c.amount for c in closed_f]
@@ -533,7 +533,7 @@ Portfolio.total_value(prices=None, fx=None, as_of_date=None)
 
 - **prices** : *Mapping[Union[Instrument, str], Any]，可选* — 证券市价字典，键可为 `Instrument` 实例或标的代码字符串（不区分大小写），值可为 [`Price`](price.md) 或按标的计价货币与基准单位解释的裸数值。当组合持有任何证券标的时，每只证券都必须在 `prices` 中提供市价。
 - **fx** : *ExchangeRate 或 FXEngine，可选* — 当组合持有计价货币不等于 `self.base_currency` 的现金或证券时必填。
-- **as_of_date** : *date, datetime 或 str，可选* — 估值日期；当 `fx` 为 `FXEngine` 时按该日期查询历史汇率。
+- **as_of_date** : *date, datetime 或 str，可选* — 估值日期；当 `fx` 为 `FXEngine` 时按该日期查询历史汇率（传入日期时须有当天汇率，省略时使用不带日期的汇率）。
 
 **返回值**
 
@@ -690,7 +690,7 @@ Portfolio.rebalance(target_weights, prices=None, fx=None, as_of_date=None)
 >>> pf = Portfolio("CNY")
 >>> _ = pf.deposit(CNY, 8000, "2024-01-01")
 >>> # 目标配置：50% CNY 现金 (4000 CNY)、25% USD 现金 (2000 CNY = 250 USD)、25% AAPL 股票 (2000 CNY = 250 USD = 5 股 @ $50)
->>> adj = pf.rebalance({CNY: Decimal("0.5"), USD: Decimal("0.25"), aapl: Decimal("0.25")}, {aapl: 50}, fx=ExchangeRate("8", "USD", "CNY"))
+>>> adj = pf.rebalance({CNY: Decimal("0.5"), USD: Decimal("0.25"), aapl: Decimal("0.25")}, {aapl: 50}, fx=ExchangeRate("USD", "CNY", "8"))
 >>> adj[CNY], adj[USD], adj[aapl]
 (Money(FixedArray(-4000.00, scale=2), currency='CNY'), Money(FixedArray(250.00, scale=2), currency='USD'), Quantity(FixedArray(5.0000, scale=4), unit='share'))
 ```
@@ -779,7 +779,7 @@ Portfolio._resolve(asset)
 >>> _ = pf.deposit(cad_stock, 3, "2024-01-02", price=10)
 >>> pf._resolve("cad") is cad_stock  # 优先命中已持有的股票 CAD
 True
->>> _ = pf.deposit(CAD, 5, "2024-01-02", fx=ExchangeRate("0.75", "CAD", "USD"))
+>>> _ = pf.deposit(CAD, 5, "2024-01-02", fx=ExchangeRate("CAD", "USD", "0.75"))
 >>> pf._resolve("CAD")  # 同时持有股票 CAD 与加元现金 CAD：拒绝猜测并报错
 Traceback (most recent call last):
     ...
@@ -818,7 +818,7 @@ Portfolio._to_base(money, fx, as_of_date)
 Portfolio._sum(values)
 ```
 
-- **`_rate(fx, currency, as_of_date)`**：提取 `currency` 与 `self.base_currency` 之间的 `ExchangeRate`。若 `fx is None` 抛出 `ValueError`；若 `hasattr(fx, "get_rate")`（如 `FXEngine`），则将非空的 `as_of_date` 通过 [`to_date`](_utils.md#to_date) 解析后调用 `fx.get_rate(currency, self.base_currency, as_of_date=when)`；否则直接返回 `fx`。
+- **`_rate(fx, currency, as_of_date)`**：提取 `currency` 与 `self.base_currency` 之间的 `ExchangeRate`。若 `fx is None` 抛出 `ValueError`；若 `hasattr(fx, "get_rate")`（如 [`FXEngine`](fx.md#fxengineprovider-base_anchor_currencyusd)），则调用 [`to_date(as_of_date, "as_of_date", optional=True)`](_utils.md#to_date) 解析后调用 `fx.get_rate(currency, self.base_currency, as_of_date=when)`；否则直接返回 `fx`。
 - **`_base_to_local(value, currency, fx, as_of_date)`**：供 [`rebalance`](#portfoliorebalance) 将基准货币价值 `value`（`FixedArray`）转换为本地货币价值的**精确分子与分母二元组 `(num, den)`**（不执行任何除法舍入）：同币种返回 `(value, FixedArray(1))`；正向汇率 `(base_currency, currency)` 返回 `(value.mul_round(rate.rate, rounding=None), FixedArray(1))`；反向汇率 `(currency, base_currency)` 返回 `(value, rate.rate)`。
 - **`_to_base(money, fx, as_of_date)`**：若 `money.currency == self.base_currency` 原样返回 `money`，否则调用 [`_convert_at_rate(money, self._rate(fx, money.currency, as_of_date), self.base_currency)`](lot.md#_convert_at_rate) 单次舍入换算为基准货币。
 - **`_sum(values)`**：以 `Money(0, self.base_currency)` 为初值，将可迭代对象 `values` 中的基准货币 `Money` 依次相加。
@@ -829,8 +829,8 @@ Portfolio._sum(values)
 >>> from moneta import Portfolio, USD
 >>> from moneta.fx import ExchangeRate
 >>> pf = Portfolio("CNY")
->>> pf._base_to_local(FixedArray("720.00"), USD, ExchangeRate("7.20", "USD", "CNY"), None)
+>>> pf._base_to_local(FixedArray("720.00"), USD, ExchangeRate("USD", "CNY", "7.20"), None)
 (FixedArray(720.00, scale=2), FixedArray(7.20, scale=2))
->>> pf._base_to_local(FixedArray("720.00"), USD, ExchangeRate("0.125", "CNY", "USD"), None)
+>>> pf._base_to_local(FixedArray("720.00"), USD, ExchangeRate("CNY", "USD", "0.125"), None)
 (FixedArray(90.00000, scale=5), FixedArray(1, scale=0))
 ```

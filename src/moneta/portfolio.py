@@ -279,7 +279,7 @@ class Portfolio:
         if fx is None:
             raise ValueError(f"需要 {currency.code}/{self._base_currency.code} 的汇率：请传入 fx")
         if hasattr(fx, "get_rate"):
-            when = None if as_of_date is None else to_date(as_of_date, "as_of_date")
+            when = to_date(as_of_date, "as_of_date", optional=True)
             return fx.get_rate(currency, self._base_currency, as_of_date=when)
         return fx
 

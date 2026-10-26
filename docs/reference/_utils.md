@@ -34,15 +34,13 @@ True
 
 ### 2. 多源日期归一化与语义化报错（`to_date` 与 `is_leap_year`）
 
-在持仓批次（[`PositionLot`](lot.md)）、计日惯例（`year_fraction`）与现金流排程（`CashFlow`）中，所有涉及日期的参数均通过 [
-`to_date(value, what="日期")`](#to_date) 统一归一化为标准库的 `datetime.date` 对象：
+在持仓批次（[`PositionLot`](lot.md)）、汇率引擎（[`fx`](fx.md)）、投资组合（[`Portfolio`](portfolio.md)）、计日惯例（`year_fraction`）与现金流排程（`CashFlow`）中，所有涉及日期的参数均通过 [`to_date(value, what="日期", optional=False)`](#to_date) 统一归一化为标准库的 `datetime.date` 对象：
 
-- 若传入 `datetime.datetime`（注意 `issubclass(datetime, date)` 为 `True`，故必须先判 `datetime`），自动调用 `.date()`
-  剥离时间部分；
+- 当 `optional=True` 且 `value is None` 时，直接返回 `None`（默认 `optional=False` 时 `None` 抛出 `TypeError`）；
+- 若传入 `datetime.datetime`（注意 `issubclass(datetime, date)` 为 `True`，故必须先判 `datetime`），自动调用 `.date()` 剥离时间部分；
 - 若传入 `datetime.date`，原样返回；
 - 若传入 `str`，先 `.strip()` 去除首尾空白再按 `date.fromisoformat` 解析 ISO-8601 字符串（`"YYYY-MM-DD"`）；
-- 可选的 `what` 参数允许调用方注入具体的字段名（如 `"acquired_date"`、`"as_of_date"`），使抛出的 `TypeError` 或 `ValueError`
-  直接指出报错参数名称。
+- 可选的 `what` 参数允许调用方注入具体的字段名（如 `"acquired_date"`、`"as_of_date"`），使抛出的 `TypeError` 或 `ValueError` 直接指出报错参数名称。
 
 ### 3. 穿透内部调用链的精准告警定位（`user_stacklevel`）
 
@@ -116,27 +114,25 @@ True
 ### `to_date`
 
 ```python
-moneta._utils.to_date(value, what="日期")
+moneta._utils.to_date(value, what="日期", optional=False)
 ```
 
-将 `datetime.date`、`datetime.datetime` 或 ISO-8601 格式的日期字符串（`"YYYY-MM-DD"`）解析并归一化为标准 `datetime.date`
-对象。
+将 `datetime.date`、`datetime.datetime` 或 ISO-8601 格式的日期字符串（`"YYYY-MM-DD"`）解析并归一化为标准 `datetime.date` 对象。函数声明了两个 `@overload` 重载签名：当不传 `optional` 或 `optional=False` 时，类型检查器精确推断返回类型为 `date`；当 `optional=True` 时，推断返回类型为 `Optional[date]`。
 
 **参数**
 
-- **value** : *date, datetime 或 str* — 待解析的日期值；若为 `str`，会自动去除首尾空白字符。
+- **value** : *date, datetime, str 或 None* — 待解析的日期值；若为 `str`，会自动去除首尾空白字符。
 - **what** : *str，默认 `"日期"`* — 用于异常提示信息的参数名称标签（如 `"acquired_date"`、`"as_of_date"`）。
+- **optional** : *bool，默认 `False`* — 是否允许传入 `None`：为 `True` 时 `None` 直接返回 `None`；为 `False` 时 `None` 抛出 `TypeError`。
 
 **返回值**
 
-- **out** : *datetime.date* — 标准日期对象（当输入为 `datetime` 时返回 `value.date()`，保证 `type(out) is date`）。
+- **out** : *datetime.date 或 None* — 标准日期对象（当输入为 `datetime` 时返回 `value.date()`，保证 `type(out) is date`）；当 `optional=True` 且输入为 `None` 时返回 `None`。
 
 **异常**
 
-- **TypeError** — `value` 不是 `date`、`datetime` 或 `str`（报
-  `f"{what} 必须是 date、datetime 或 ISO 字符串，收到 {type(value).__name__}"`）。
-- **ValueError** — `value` 是字符串但不是合法的 ISO 日期格式或日历日期越界（报
-  `f"{what} 不是合法的 ISO 日期: {value!r}"`）。
+- **TypeError** — `value` 不是 `date`、`datetime` 或 `str`，或 `optional=False` 时传入了 `None`（报 `f"{what} 必须是 date、datetime 或 ISO 字符串，收到 {type(value).__name__}"`，传入 `None` 时收到 `NoneType`）。
+- **ValueError** — `value` 是字符串但不是合法的 ISO 日期格式或日历日期越界（报 `f"{what} 不是合法的 ISO 日期: {value!r}"`）。
 
 **示例**
 
@@ -145,6 +141,12 @@ moneta._utils.to_date(value, what="日期")
 >>> from moneta._utils import to_date
 >>> to_date(date(2024, 1, 2)), to_date(datetime(2024, 1, 2, 15, 30)), to_date("  2024-01-02\t")
 (datetime.date(2024, 1, 2), datetime.date(2024, 1, 2), datetime.date(2024, 1, 2))
+>>> to_date(None, optional=True) is None
+True
+>>> to_date(None, "as_of_date")
+Traceback (most recent call last):
+    ...
+TypeError: as_of_date 必须是 date、datetime 或 ISO 字符串，收到 NoneType
 >>> to_date("2024/01/02", "acquired_date")
 Traceback (most recent call last):
     ...

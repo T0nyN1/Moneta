@@ -195,21 +195,21 @@ class TestValuation:
 
     def test_foreign_quote_needs_current_fx(self):
         lot = stock(10, "1000", cost_base=cny("7000"))  # 买入时 USD/CNY = 7.0
-        now = ExchangeRate("7.2", "USD", "CNY")
+        now = ExchangeRate("USD", "CNY", "7.2")
         assert lot.market_value(100, now) == cny("7200")  # 用当前汇率，而不是入场汇率
         assert lot.pnl(100, now) == cny("200") and lot.return_rate(100, now) == F("0.0285714286")  # 2 + 8 位小数
         # 任一方向的汇率都可以：反方向时直接除以汇率，只舍入一次
-        assert lot.market_value(100, ExchangeRate("0.125", "CNY", "USD")) == cny("8000")
-        assert lot.market_value(100, ExchangeRate("8", "USD", "CNY")) == cny("8000")
-        assert lot.market_value(Decimal("100.01"), ExchangeRate("0.3", "CNY", "USD")) == cny("3333.67")
+        assert lot.market_value(100, ExchangeRate("CNY", "USD", "0.125")) == cny("8000")
+        assert lot.market_value(100, ExchangeRate("USD", "CNY", "8")) == cny("8000")
+        assert lot.market_value(Decimal("100.01"), ExchangeRate("CNY", "USD", "0.3")) == cny("3333.67")
         with pytest.raises(ValueError, match="需要 USD/CNY 的汇率"):
             lot.market_value(100)
         with pytest.raises(TypeError, match="不匹配"):
-            lot.market_value(100, ExchangeRate("1.1", "EUR", "USD"))
+            lot.market_value(100, ExchangeRate("EUR", "USD", "1.1"))
 
     def test_cash(self):
         eur = PositionLot(EUR, Money("100", "EUR"), "2024-01-02", cost_base=usd("108.00"))
-        now = ExchangeRate("1.10", "EUR", "USD")
+        now = ExchangeRate("EUR", "USD", "1.10")
         assert eur.market_value(fx=now) == usd(110) and eur.pnl(fx=now) == usd(2)
         local = PositionLot(USD, usd(100), "2024-01-02")
         assert local.market_value() == usd(100) and local.pnl() == usd(0) and local.return_rate() == 0
@@ -222,7 +222,7 @@ class TestValuation:
         lot = stock(10, "1000", cost_base=cny("7000"))
         with pytest.raises(ValueError, match="缺少标的 AAPL 的市价"):
             lot.market_value()
-        na_value = lot.market_value(Price(None, "USD"), ExchangeRate("7.2", "USD", "CNY"))
+        na_value = lot.market_value(Price(None, "USD"), ExchangeRate("USD", "CNY", "7.2"))
         assert na_value.isna() and na_value.currency is CNY  # 缺失的市价得到缺失的市值，而不是 0
         assert stock(10, "1000").pnl(Price(None, "USD")).isna()
 
