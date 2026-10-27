@@ -35,7 +35,7 @@ Moneta 自下而上分为四层，上层只依赖下层：
 - **量纲层**：在 `FixedArray` 之上通过 [`UnitArray`](reference/unit_array.md) 与 [`_units`](reference/_units.md) 附加物理单位及币种（[`Currency`](reference/currency.md)、[`CurrencyRegistry`](reference/currency.md#currencyregistry)），阻止不同量纲之间的非法运算。
 - **业务对象**：金额（[`Money`](reference/money.md)）、价格（[`Price`](reference/price.md)）、数量（[
   `Quantity`](reference/quantity.md)）、标的（[`Instrument`](reference/instrument.md)）、持仓批次（[`PositionLot`](reference/lot.md)）、汇率（[`ExchangeRate`](reference/fx.md)）等金融语义对象，本身也可以是数组（张量）。
-- **应用层**：组合估值与再平衡（[`Portfolio`](reference/portfolio.md)）、汇率引擎（[`FXEngine`](reference/fx.md)）、现金流排程与货币时间价值计算。
+- **应用层**：组合估值与再平衡（[`Portfolio`](reference/portfolio.md)）、汇率引擎（[`FXEngine`](reference/fx.md)）、现金流排程（[`CashFlow`](reference/cashflow.md)）与货币时间价值计算。
 
 ## 安装
 

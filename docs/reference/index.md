@@ -49,7 +49,7 @@
 | 模块                 | 公开接口                                  | 说明                                                           |
 |----------------------|-------------------------------------------|----------------------------------------------------------------|
 | `moneta.conventions` | `DayCountConvention`、`year_fraction`     | 金融计日惯例（ACT/360、ACT/365F、30/360 等）与年化时间跨度计算 |
-| `moneta.cashflow`    | `CashFlow`、`generate_cash_flow_schedule` | 未来现金流定义与定期付息/摊还排程生成                          |
+| [`moneta.cashflow`](cashflow.md) | [`CashFlow`](cashflow.md#cashflowamount-pay_date-label)、[`generate_cash_flow_schedule`](cashflow.md#generate_cash_flow_schedule) | 未来现金流定义与定期付息/本金归还排程生成                      |
 | `moneta.tvm`         | `pv`、`fv`、`npv`、`discount_factors`     | 现值、终值、净现值与折现因子张量计算                           |
 
 ## 格式化输出
