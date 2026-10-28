@@ -16,13 +16,13 @@ True
 
 ## 特性
 
-- **精确定点数张量**：[`FixedArray`](docs/reference/fixed_array.md) 支持广播、切片、求和、矩阵乘法与缺失值（`<NA>`），只在超出 `int64` 时报错，不会悄悄丢精度。
+- **精确定点数张量**：[`FixedArray`](docs/zh/reference/fixed_array.md) 支持广播、切片、求和、矩阵乘法与缺失值（`<NA>`），只在超出 `int64` 时报错，不会悄悄丢精度。
 - **显式单次舍入**：六种舍入模式（`half_up`、`half_even`、`down`、`up`、`floor`、`ceil`），乘除法融合舍入，结果与对精确值舍入一次完全一致。
-- **量纲安全**：[`Money`](docs/reference/money.md)、[`Price`](docs/reference/price.md)、[`Quantity`](docs/reference/quantity.md) 拦截跨币种、跨单位的非法运算，`Price × Quantity → Money` 自动完成量纲相消；金额始终保持币种精度，支持最大余数法守恒分配。
-- **外汇**：[`ExchangeRate`](docs/reference/fx.md) 支持买卖价与正反向单次舍入换算；[`FXEngine`](docs/reference/fx.md) 经锚定货币精确套算交叉汇率，可组合多个汇率源，按日期严格取价。
-- **持仓与组合**：[`PositionLot`](docs/reference/lot.md) 同时记录计价货币与基准货币成本，[`Portfolio`](docs/reference/portfolio.md) 支持 FIFO / LIFO / WAC 平仓、多币种估值、盈亏与再平衡试算。
-- **现金流与时间价值**：[付息排程](docs/reference/cashflow.md)、[计日惯例](docs/reference/conventions.md)（ACT/360、ACT/365 Fixed、30/360 Bond Basis、ACT/ACT ISDA）与 [`pv` / `fv` / `npv`](docs/reference/tvm.md)。
-- **展示格式化**：[`MonetaryFormatter`](docs/reference/formatter.md) 输出千分位、币种符号与代码、会计负数括号。
+- **量纲安全**：[`Money`](docs/zh/reference/money.md)、[`Price`](docs/zh/reference/price.md)、[`Quantity`](docs/zh/reference/quantity.md) 拦截跨币种、跨单位的非法运算，`Price × Quantity → Money` 自动完成量纲相消；金额始终保持币种精度，支持最大余数法守恒分配。
+- **外汇**：[`ExchangeRate`](docs/zh/reference/fx.md) 支持买卖价与正反向单次舍入换算；[`FXEngine`](docs/zh/reference/fx.md) 经锚定货币精确套算交叉汇率，可组合多个汇率源，按日期严格取价。
+- **持仓与组合**：[`PositionLot`](docs/zh/reference/lot.md) 同时记录计价货币与基准货币成本，[`Portfolio`](docs/zh/reference/portfolio.md) 支持 FIFO / LIFO / WAC 平仓、多币种估值、盈亏与再平衡试算。
+- **现金流与时间价值**：[付息排程](docs/zh/reference/cashflow.md)、[计日惯例](docs/zh/reference/conventions.md)（ACT/360、ACT/365 Fixed、30/360 Bond Basis、ACT/ACT ISDA）与 [`pv` / `fv` / `npv`](docs/zh/reference/tvm.md)。
+- **展示格式化**：[`MonetaryFormatter`](docs/zh/reference/formatter.md) 输出千分位、币种符号与代码、会计负数括号。
 
 ## 安装
 
@@ -116,15 +116,15 @@ ExchangeRate('EUR', 'JPY', '168.7175')
 
 ## 文档
 
-- [文档首页](docs/index.md)：架构总览、安装与五分钟上手
-- [API 参考](docs/reference/index.md)：各模块的机制说明、完整参数、示例与性能对比
+- [文档首页](docs/zh/index.md)：架构总览、安装与五分钟上手
+- [API 参考](docs/zh/reference/index.md)：各模块的机制说明、完整参数、示例与性能对比
 
 | 层次     | 模块                                                                                                                                                                                                                       |
 |----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| 数值内核 | [`fixed_array`](docs/reference/fixed_array.md)、[`_rounding`](docs/reference/_rounding.md)、[`_limbs`](docs/reference/_limbs.md)、[`_utils`](docs/reference/_utils.md)                                                        |
-| 量纲层   | [`unit_array`](docs/reference/unit_array.md)、[`_units`](docs/reference/_units.md)、[`currency`](docs/reference/currency.md)                                                                                                |
-| 业务对象 | [`money`](docs/reference/money.md)、[`price`](docs/reference/price.md)、[`quantity`](docs/reference/quantity.md)、[`instrument`](docs/reference/instrument.md)、[`lot`](docs/reference/lot.md)、[`fx`](docs/reference/fx.md)、[`formatter`](docs/reference/formatter.md) |
-| 应用层   | [`portfolio`](docs/reference/portfolio.md)、[`conventions`](docs/reference/conventions.md)、[`cashflow`](docs/reference/cashflow.md)、[`tvm`](docs/reference/tvm.md)                                                        |
+| 数值内核 | [`fixed_array`](docs/zh/reference/fixed_array.md)、[`_rounding`](docs/zh/reference/_rounding.md)、[`_limbs`](docs/zh/reference/_limbs.md)、[`_utils`](docs/zh/reference/_utils.md)                                                        |
+| 量纲层   | [`unit_array`](docs/zh/reference/unit_array.md)、[`_units`](docs/zh/reference/_units.md)、[`currency`](docs/zh/reference/currency.md)                                                                                                |
+| 业务对象 | [`money`](docs/zh/reference/money.md)、[`price`](docs/zh/reference/price.md)、[`quantity`](docs/zh/reference/quantity.md)、[`instrument`](docs/zh/reference/instrument.md)、[`lot`](docs/zh/reference/lot.md)、[`fx`](docs/zh/reference/fx.md)、[`formatter`](docs/zh/reference/formatter.md) |
+| 应用层   | [`portfolio`](docs/zh/reference/portfolio.md)、[`conventions`](docs/zh/reference/conventions.md)、[`cashflow`](docs/zh/reference/cashflow.md)、[`tvm`](docs/zh/reference/tvm.md)                                                        |
 
 ## 开发
 

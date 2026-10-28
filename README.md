@@ -18,13 +18,13 @@ True
 
 ## Features
 
-- **Exact fixed-point tensors**: [`FixedArray`](docs/reference/fixed_array.md) supports broadcasting, slicing, sums, matrix products and missing values (`<NA>`). It raises only when a result exceeds `int64`, and never silently loses precision.
+- **Exact fixed-point tensors**: [`FixedArray`](docs/zh/reference/fixed_array.md) supports broadcasting, slicing, sums, matrix products and missing values (`<NA>`). It raises only when a result exceeds `int64`, and never silently loses precision.
 - **Explicit single rounding**: six rounding modes (`half_up`, `half_even`, `down`, `up`, `floor`, `ceil`) and fused multiply/divide-and-round, giving exactly the result of rounding the exact value once.
-- **Dimensional safety**: [`Money`](docs/reference/money.md), [`Price`](docs/reference/price.md) and [`Quantity`](docs/reference/quantity.md) reject cross-currency and cross-unit operations, and `Price × Quantity → Money` cancels units automatically. Money always stays at its currency's precision and supports conservative allocation by the largest-remainder method.
-- **FX**: [`ExchangeRate`](docs/reference/fx.md) supports bid/ask quotes and single-rounding conversion in both directions; [`FXEngine`](docs/reference/fx.md) derives exact cross rates through an anchor currency, chains multiple rate sources and matches dates strictly.
-- **Lots and portfolios**: [`PositionLot`](docs/reference/lot.md) records cost in both the quote currency and the base currency; [`Portfolio`](docs/reference/portfolio.md) supports FIFO / LIFO / WAC closing, multi-currency valuation, P&L and rebalancing.
-- **Cash flows and time value of money**: [coupon schedules](docs/reference/cashflow.md), [day count conventions](docs/reference/conventions.md) (ACT/360, ACT/365 Fixed, 30/360 Bond Basis, ACT/ACT ISDA) and [`pv` / `fv` / `npv`](docs/reference/tvm.md).
-- **Display formatting**: [`MonetaryFormatter`](docs/reference/formatter.md) renders thousands separators, currency symbols and codes, and accounting-style negative parentheses.
+- **Dimensional safety**: [`Money`](docs/zh/reference/money.md), [`Price`](docs/zh/reference/price.md) and [`Quantity`](docs/zh/reference/quantity.md) reject cross-currency and cross-unit operations, and `Price × Quantity → Money` cancels units automatically. Money always stays at its currency's precision and supports conservative allocation by the largest-remainder method.
+- **FX**: [`ExchangeRate`](docs/zh/reference/fx.md) supports bid/ask quotes and single-rounding conversion in both directions; [`FXEngine`](docs/zh/reference/fx.md) derives exact cross rates through an anchor currency, chains multiple rate sources and matches dates strictly.
+- **Lots and portfolios**: [`PositionLot`](docs/zh/reference/lot.md) records cost in both the quote currency and the base currency; [`Portfolio`](docs/zh/reference/portfolio.md) supports FIFO / LIFO / WAC closing, multi-currency valuation, P&L and rebalancing.
+- **Cash flows and time value of money**: [coupon schedules](docs/zh/reference/cashflow.md), [day count conventions](docs/zh/reference/conventions.md) (ACT/360, ACT/365 Fixed, 30/360 Bond Basis, ACT/ACT ISDA) and [`pv` / `fv` / `npv`](docs/zh/reference/tvm.md).
+- **Display formatting**: [`MonetaryFormatter`](docs/zh/reference/formatter.md) renders thousands separators, currency symbols and codes, and accounting-style negative parentheses.
 
 ## Installation
 
@@ -120,15 +120,15 @@ ExchangeRate('EUR', 'JPY', '168.7175')
 
 The documentation is currently written in Chinese; an English version is planned.
 
-- [Home](docs/index.md): architecture overview, installation and a five-minute tour
-- [API reference](docs/reference/index.md): design notes, full parameters, examples and benchmarks for every module
+- [Home](docs/zh/index.md): architecture overview, installation and a five-minute tour
+- [API reference](docs/zh/reference/index.md): design notes, full parameters, examples and benchmarks for every module
 
 | Layer            | Modules                                                                                                                                                                                                                    |
 |------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Numeric core     | [`fixed_array`](docs/reference/fixed_array.md), [`_rounding`](docs/reference/_rounding.md), [`_limbs`](docs/reference/_limbs.md), [`_utils`](docs/reference/_utils.md)                                                        |
-| Units            | [`unit_array`](docs/reference/unit_array.md), [`_units`](docs/reference/_units.md), [`currency`](docs/reference/currency.md)                                                                                                |
-| Business objects | [`money`](docs/reference/money.md), [`price`](docs/reference/price.md), [`quantity`](docs/reference/quantity.md), [`instrument`](docs/reference/instrument.md), [`lot`](docs/reference/lot.md), [`fx`](docs/reference/fx.md), [`formatter`](docs/reference/formatter.md) |
-| Applications     | [`portfolio`](docs/reference/portfolio.md), [`conventions`](docs/reference/conventions.md), [`cashflow`](docs/reference/cashflow.md), [`tvm`](docs/reference/tvm.md)                                                        |
+| Numeric core     | [`fixed_array`](docs/zh/reference/fixed_array.md), [`_rounding`](docs/zh/reference/_rounding.md), [`_limbs`](docs/zh/reference/_limbs.md), [`_utils`](docs/zh/reference/_utils.md)                                                        |
+| Units            | [`unit_array`](docs/zh/reference/unit_array.md), [`_units`](docs/zh/reference/_units.md), [`currency`](docs/zh/reference/currency.md)                                                                                                |
+| Business objects | [`money`](docs/zh/reference/money.md), [`price`](docs/zh/reference/price.md), [`quantity`](docs/zh/reference/quantity.md), [`instrument`](docs/zh/reference/instrument.md), [`lot`](docs/zh/reference/lot.md), [`fx`](docs/zh/reference/fx.md), [`formatter`](docs/zh/reference/formatter.md) |
+| Applications     | [`portfolio`](docs/zh/reference/portfolio.md), [`conventions`](docs/zh/reference/conventions.md), [`cashflow`](docs/zh/reference/cashflow.md), [`tvm`](docs/zh/reference/tvm.md)                                                        |
 
 ## Development
 

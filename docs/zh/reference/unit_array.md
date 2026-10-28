@@ -58,7 +58,7 @@ CNY
 
 ### 比较运算的三层量纲安检规则
 
-在当前 [`unit_array.py`](../../src/moneta/unit_array.py) 实现中， **有序大小比较（`< <= > >=`）** 与 **相等性比较（
+在当前 [`unit_array.py`](https://github.com/T0nyN1/Moneta/blob/main/src/moneta/unit_array.py) 实现中， **有序大小比较（`< <= > >=`）** 与 **相等性比较（
 `== !=`）** 对“量纲不匹配”和“无量纲数”采取了不同的安检策略：
 
 - **大小比较（`<`、`<=`、`>`、`>=`）—— 只要量纲不匹配或对方是无量纲数，一律报 `TypeError`**：
