@@ -46,14 +46,14 @@
 
 ## 现金流、计日惯例与货币时间价值
 
-| 模块                 | 公开接口                                  | 说明                                                           |
-|----------------------|-------------------------------------------|----------------------------------------------------------------|
-| `moneta.conventions` | `DayCountConvention`、`year_fraction`     | 金融计日惯例（ACT/360、ACT/365F、30/360 等）与年化时间跨度计算 |
-| [`moneta.cashflow`](cashflow.md) | [`CashFlow`](cashflow.md#cashflowamount-pay_date-label)、[`generate_cash_flow_schedule`](cashflow.md#generate_cash_flow_schedule) | 未来现金流定义与定期付息/本金归还排程生成                      |
-| `moneta.tvm`         | `pv`、`fv`、`npv`、`discount_factors`     | 现值、终值、净现值与折现因子张量计算                           |
+| 模块                                   | 公开接口                                                                                                                          | 说明                                                                         |
+|----------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------|
+| [`moneta.conventions`](conventions.md) | [`DayCountConvention`](conventions.md#daycountconvention)、[`year_fraction`](conventions.md#year_fraction)                        | 金融计日惯例（ACT/360、ACT/365（Fixed）、30/360 等）与年化时间跨度计算       |
+| [`moneta.cashflow`](cashflow.md)       | [`CashFlow`](cashflow.md#cashflowamount-pay_date-label)、[`generate_cash_flow_schedule`](cashflow.md#generate_cash_flow_schedule) | 未来现金流定义与定期付息/本金归还排程生成                                    |
+| [`moneta.tvm`](tvm.md)                 | [`pv`](tvm.md#pv)、[`fv`](tvm.md#fv)、[`npv`](tvm.md#npv)、[`discount_factors`](tvm.md#discount_factors)                          | 现值、终值、净现值与折现因子张量计算                                         |
 
 ## 格式化输出
 
-| 模块               | 公开接口            | 说明                                               |
-|--------------------|---------------------|----------------------------------------------------|
-| `moneta.formatter` | `MonetaryFormatter` | 千分位分隔、货币符号、会计负数括号等金融金额格式化 |
+| 模块                               | 公开接口                                              | 说明                                                     |
+|------------------------------------|-------------------------------------------------------|----------------------------------------------------------|
+| [`moneta.formatter`](formatter.md) | [`MonetaryFormatter`](formatter.md#monetaryformatter) | 千分位分隔、货币符号、会计负数括号等金融金额格式化       |

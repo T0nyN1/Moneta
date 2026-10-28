@@ -2,7 +2,7 @@
 
 `moneta._utils` 提供无状态的内部通用技术工具函数，涵盖 `int64` 极值绝对值提取（[`max_abs`](#max_abs)）、多格式日期解析（[
 `to_date`](#to_date)）、公历闰年判定（[`is_leap_year`](#is_leap_year)）以及跨包内部栈帧的动态告警层级计算（[
-`user_stacklevel`](#user_stacklevel)），支撑 [`FixedArray`](fixed_array.md)、`conventions`、[`cashflow`](cashflow.md) 与 [`lot`](lot.md) 等模块。
+`user_stacklevel`](#user_stacklevel)），支撑 [`FixedArray`](fixed_array.md)、[`conventions`](conventions.md)、[`cashflow`](cashflow.md)、[`tvm`](tvm.md) 与 [`lot`](lot.md) 等模块。
 
 ```python
 >>> from datetime import date, datetime
@@ -34,7 +34,7 @@ True
 
 ### 2. 多源日期归一化与语义化报错（`to_date` 与 `is_leap_year`）
 
-在持仓批次（[`PositionLot`](lot.md)）、汇率引擎（[`fx`](fx.md)）、投资组合（[`Portfolio`](portfolio.md)）、计日惯例（`year_fraction`）与现金流排程（[`CashFlow`](cashflow.md)）中，所有涉及日期的参数均通过 [`to_date(value, what="日期", optional=False)`](#to_date) 统一归一化为标准库的 `datetime.date` 对象：
+在持仓批次（[`PositionLot`](lot.md)）、汇率引擎（[`fx`](fx.md)）、投资组合（[`Portfolio`](portfolio.md)）、计日惯例（[`year_fraction`](conventions.md#year_fraction)）、现金流排程（[`CashFlow`](cashflow.md)）与货币时间价值（[`tvm`](tvm.md)）中，所有涉及日期的参数均通过 [`to_date(value, what="日期", optional=False)`](#to_date) 统一归一化为标准库的 `datetime.date` 对象：
 
 - 当 `optional=True` 且 `value is None` 时，直接返回 `None`（默认 `optional=False` 时 `None` 抛出 `TypeError`）；
 - 若传入 `datetime.datetime`（注意 `issubclass(datetime, date)` 为 `True`，故必须先判 `datetime`），自动调用 `.date()` 剥离时间部分；

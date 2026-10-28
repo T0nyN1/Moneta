@@ -1,13 +1,12 @@
 # PositionLot 与 LotMatchingRule — 持仓批次核算与平仓结转规则
 
-`moneta.PositionLot` 表示单笔不可变的现金或证券持仓成本批次（Tax / Accounting Lot），`moneta.LotMatchingRule` 定义先进先出（`FIFO`）、后进先出（`LIFO`）与加权平均成本（`WAC`）三种平仓结转规则，`moneta.lot.match_lots` 则在保持总数量与总成本严格守恒的前提下从多笔同标的批次中扣减指定数量。
+`moneta.PositionLot` 表示单笔不可变的现金或证券持仓成本批次（Tax / Accounting Lot），`moneta.LotMatchingRule` 定义先进先出（`FIFO`）、后进先出（`LIFO`）与加权平均成本（`WAC`）三种平仓结转规则，`moneta.match_lots` 则在保持总数量与总成本严格守恒的前提下从多笔同标的批次中扣减指定数量。
 
 每笔批次同时显式记录**计价货币总成本 `cost`** 与**组合基准货币总成本 `cost_base`**（不做任何隐含的 1:1 换汇），支持最大余数法（Hare-Niemeyer）无损拆分（[`split`](#positionlotsplit)）、跨币种单次舍入盯市估值（[`market_value`](#positionlotmarket_value)）、浮动/已实现盈亏（[`profit_loss` / `pnl`](#positionlotprofit_loss-与-positionlotpnl)）以及持有期收益率（[`return_rate`](#positionlotreturn_rate)）核算。
 
 ```python
->>> from moneta import Instrument, LotMatchingRule, Money, PositionLot, Price, Quantity, CNY, USD
+>>> from moneta import Instrument, LotMatchingRule, Money, PositionLot, Price, Quantity, CNY, USD, match_lots
 >>> from moneta.fx import ExchangeRate
->>> from moneta.lot import match_lots
 >>> aapl = Instrument("AAPL", "USD")
 >>> lot = PositionLot(aapl, Quantity(10), "2024-01-02", cost=Money("1800.00", "USD"), cost_base=Money("12600.00", "CNY"), label="B-01")
 >>> lot.asset is aapl, lot.is_cash, lot.base_currency is CNY, lot.holding_days("2024-03-02")
@@ -703,10 +702,10 @@ AttributeError: PositionLot 是不可变对象，禁止删除属性 '_cost'
 ### `match_lots`
 
 ```python
-moneta.lot.match_lots(lots, amount, rule=LotMatchingRule.FIFO)
+moneta.match_lots(lots, amount, rule=LotMatchingRule.FIFO)
 ```
 
-按指定的会计结转规则 `rule`（[`FIFO`、`LIFO` 或 `WAC`](#lotmatchingrule)）从同一标的、同一基准货币的持仓批次序列 `lots` 中扣减数量 `amount`，返回 `(平掉的批次列表, 剩余批次列表)`。
+按指定的会计结转规则 `rule`（[`FIFO`、`LIFO` 或 `WAC`](#lotmatchingrule)）从同一标的、同一基准货币的持仓批次序列 `lots` 中扣减数量 `amount`，返回 `(平掉的批次列表, 剩余批次列表)`（同时由顶层 `moneta` 与 `moneta.lot` 导出）。
 
 **参数**
 
@@ -740,8 +739,7 @@ moneta.lot.match_lots(lots, amount, rule=LotMatchingRule.FIFO)
 对比同一组持仓在 `FIFO`、`LIFO` 与 `WAC` 下的平仓结果：
 
 ```python
->>> from moneta import Instrument, LotMatchingRule, Money, PositionLot, Quantity
->>> from moneta.lot import match_lots
+>>> from moneta import Instrument, LotMatchingRule, Money, PositionLot, Quantity, match_lots
 >>> aapl = Instrument("AAPL", "USD")
 >>> l1 = PositionLot(aapl, Quantity(10), "2024-01-01", cost=Money("1000", "USD"))
 >>> l2 = PositionLot(aapl, Quantity(5), "2024-02-01", cost=Money("600", "USD"))
