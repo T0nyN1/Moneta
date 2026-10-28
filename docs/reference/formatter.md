@@ -19,6 +19,60 @@ array([['$1,000.00 USD', '<NA>'],
 
 [← API 参考](index.md)
 
+## 效果预览
+
+下面三段示例直接 `print` 格式化结果，展示最终输出到报表或终端时的样子。
+
+**单币种报表**：用 `format_array` 一次格式化整列金额，负数用会计括号，缺失值显示为 `<NA>`：
+
+```python
+>>> from moneta import MonetaryFormatter, Money
+>>> items = ["营业收入", "营业成本", "汇兑损益", "待定款项", "净利润额"]
+>>> amounts = Money(["1234567.89", "-856000", "-0.5", None, "378567.39"], "USD")
+>>> for item, text in zip(items, MonetaryFormatter.format_array(amounts, accounting=True)):
+...     print(f"{item}  {text:>20}")
+营业收入     $1,234,567.89 USD
+营业成本     ($856,000.00 USD)
+汇兑损益           ($0.50 USD)
+待定款项                  <NA>
+净利润额       $378,567.39 USD
+```
+
+**多币种对照**：小数位随币种变化（JPY 没有小数），`¥` 靠代码区分 CNY 与 JPY，CHF 的符号与代码相同时只显示一次：
+
+```python
+>>> for m in [Money("1234567.89", "CNY"), Money("1234567", "JPY"), Money("-1234.5", "CHF"),
+...           Money("88000", "HKD"), Money("-0.01", "GBP")]:
+...     print(f"{m.currency.code}  {MonetaryFormatter.format(m):>20}")
+CNY     ¥1,234,567.89 CNY
+JPY        ¥1,234,567 JPY
+CHF         -1,234.50 CHF
+HKD      HK$88,000.00 HKD
+GBP            -£0.01 GBP
+```
+
+**同一金额的不同样式**：
+
+```python
+>>> m = Money("-1234567.89", "EUR")
+>>> styles = {
+...     "默认格式": {},
+...     "会计括号": {"accounting": True},
+...     "仅显符号": {"show_code": False},
+...     "仅显代码": {"show_symbol": False},
+...     "欧陆分隔": {"thousands_sep": ".", "decimal_sep": ","},
+...     "纯数字值": {"show_symbol": False, "show_code": False, "thousands_sep": ""},
+... }
+>>> for name, kwargs in styles.items():
+...     print(f"{name}  {MonetaryFormatter.format(m, **kwargs):>20}")
+默认格式   -€1,234,567.89 EUR
+会计括号   (€1,234,567.89 EUR)
+仅显符号        -€1,234,567.89
+仅显代码     -1,234,567.89 EUR
+欧陆分隔   -€1.234.567,89 EUR
+纯数字值           -1234567.89
+```
+
 ## 核心机制与设计约束
 
 ### 1. 默认同时显示币种符号与代码的消歧设计
