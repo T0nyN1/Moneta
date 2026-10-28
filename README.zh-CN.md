@@ -1,8 +1,8 @@
-<p align="center"><img src="docs/_static/moneta-logo.svg" width="128" alt="Moneta logo"></p>
-
 # Moneta
 
 [English](README.md) | 简体中文
+
+<p align="center"><img src="docs/_static/moneta-logo.svg" width="128" alt="Moneta logo"></p>
 
 Moneta 是一个基于 NumPy 的**定点数**多币种金融计算库。所有数值在底层都以 `int64` 尾数加十进制小数位数（`scale`）表示，加减乘、求和、矩阵乘法全程走整数运算，不会出现浮点累积误差；舍入只在你明确要求的地方、按你指定的规则发生一次。
 
@@ -115,6 +115,8 @@ ExchangeRate('EUR', 'JPY', '168.7175')
 ```
 
 ## 文档
+
+在线阅读：**<https://t0nyn1.github.io/Moneta/>**，也可以直接浏览 Markdown 源文件：
 
 - [文档首页](docs/zh/index.md)：架构总览、安装与五分钟上手
 - [API 参考](docs/zh/reference/index.md)：各模块的机制说明、完整参数、示例与性能对比

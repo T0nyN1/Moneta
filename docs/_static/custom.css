@@ -1,0 +1,37 @@
+/* 正文标题里的行内代码按标题文字显示：文档中标题有的带反引号、有的不带，统一外观 */
+.bd-article :is(h1, h2, h3, h4, h5, h6) code.literal {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+}
+
+/* 右侧“当前页面”大纲 */
+
+/* 标题里的行内代码按普通文字显示，不要代码块底色与等宽字体 */
+.page-toc a.nav-link code.literal {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+}
+
+/* 含代码的条目（如构造函数签名）只占一行，过长时以省略号截断，悬停时显示全文（见 custom.js）；
+   纯文字标题照常换行，避免截掉中文说明 */
+.page-toc a.nav-link:has(code.literal) {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 大纲列表是纵向 flex 布局，子项宽度按内容计算，会被长条目撑出栏外，导致省略号不生效 */
+.page-toc .nav-item {
+  max-width: 100%;
+}
+
+/* 截断后 span 之间的空格仍需保留，否则签名会挤在一起 */
+.page-toc a.nav-link code.literal span.pre {
+  white-space: pre;
+}

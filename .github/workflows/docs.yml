@@ -1,0 +1,68 @@
+# 构建 Sphinx 文档并发布到 GitHub Pages：https://t0nyn1.github.io/Moneta/
+# 首次使用需在仓库 Settings → Pages → Source 中选择 “GitHub Actions”。
+name: docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "src/**"
+      - "pyproject.toml"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 安装依赖
+        run: pip install -e ".[docs]"
+
+      # 每种语言构建到 _site/<语言>/，根目录跳转到中文版；以后加英文版时中文网址不变
+      # -W：任何警告（如失效的锚点链接）都让构建失败
+      - name: 构建中文文档
+        run: python -m sphinx -W --keep-going -c docs docs/zh _site/zh
+
+      - name: 根目录跳转
+        run: |
+          cat > _site/index.html <<'EOF'
+          <!doctype html>
+          <meta charset="utf-8">
+          <meta http-equiv="refresh" content="0; url=zh/">
+          <link rel="canonical" href="zh/">
+          <title>Moneta</title>
+          <a href="zh/">Moneta 文档</a>
+          EOF
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

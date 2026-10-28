@@ -57,3 +57,26 @@
 | 模块                               | 公开接口                                              | 说明                                                     |
 |------------------------------------|-------------------------------------------------------|----------------------------------------------------------|
 | [`moneta.formatter`](formatter.md) | [`MonetaryFormatter`](formatter.md#monetaryformatter) | 千分位分隔、货币符号、会计负数括号等金融金额格式化       |
+
+```{toctree}
+:hidden:
+
+fixed_array
+_rounding
+_limbs
+_utils
+unit_array
+_units
+currency
+money
+price
+quantity
+instrument
+lot
+portfolio
+fx
+conventions
+cashflow
+tvm
+formatter
+```

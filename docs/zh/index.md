@@ -130,3 +130,9 @@ Money(FixedArray(2895.00, scale=2), currency='USD')
 
 - 文档代码中以 `>>>` 开头的行是输入，紧随其后不带提示符的行是输出。
 - 所有示例默认已执行 `import numpy as np` 与 `from moneta import FixedArray`，需要其他名称时会在示例中显式导入。
+
+```{toctree}
+:hidden:
+
+API 参考 <reference/index>
+```

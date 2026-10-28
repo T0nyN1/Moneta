@@ -1,8 +1,8 @@
-<p align="center"><img src="docs/_static/moneta-logo.svg" width="128" alt="Moneta logo"></p>
-
 # Moneta
 
 English | [简体中文](README.zh-CN.md)
+
+<p align="center"><img src="docs/_static/moneta-logo.svg" width="128" alt="Moneta logo"></p>
 
 High-performance, fixed-point multi-currency and FX pricing tensor engine based on NumPy. Zero float drift, portfolio revaluation, and banking-grade precision.
 
@@ -118,7 +118,7 @@ ExchangeRate('EUR', 'JPY', '168.7175')
 
 ## Documentation
 
-The documentation is currently written in Chinese; an English version is planned.
+The documentation is currently written in Chinese; an English version is planned. Read it online at **<https://t0nyn1.github.io/Moneta/>**, or browse the Markdown sources:
 
 - [Home](docs/zh/index.md): architecture overview, installation and a five-minute tour
 - [API reference](docs/zh/reference/index.md): design notes, full parameters, examples and benchmarks for every module
