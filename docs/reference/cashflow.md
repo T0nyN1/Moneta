@@ -38,7 +38,7 @@
 
 在固定收益付息日生成中，若采用“上一期付息日 + 1 个周期”的递推写法，从 `2024-01-31` 按月递推会先变成 `2024-02-29`，再变成 `2024-03-29`、`2024-04-29`，导致后续所有付息日永久漂移到 29 日。
 
-[`generate_cash_flow_schedule`](#generate_cash_flow_schedule) 通过 [`_add_months(start, k * step, end_of_month)`](#_periods_per_year_add_months-与-_coupon_amount) 始终以起息日 `start` 为唯一基准推算第 $k$ 期（$k = 1, 2, \dots$）付息日：
+[`generate_cash_flow_schedule`](#generate_cash_flow_schedule) 通过 [`_add_months(start, k * step, end_of_month)`](#_parse_frequency_add_months-与-_coupon_amount) 始终以起息日 `start` 为唯一基准推算第 $k$ 期（$k = 1, 2, \dots$）付息日：
 
 | 起息日 `start_date` 特征 | `end_of_month` 标志 | 第 $k$ 期付息日推算规则 | 示例（`2024` 闰年按月付息） |
 |---|---|---|---|
@@ -52,7 +52,7 @@
 当通过 `principal` 与年化票息率 `coupon_rate` 计算每期票息 $\text{coupon} = \text{principal} \times \text{rate} / n$（其中 $n \in \{1, 2, 4, 12\}$ 为每年付息次数）时：
 
 1. 若先用无损乘法 `principal * rate` 再除以 $n$，当 `coupon_rate` 是高精度的 `float`（如 `0.07 / 12`，最短十进制表示有 18 位小数）时，本金 `1000.00` 与它的乘积尾数约为 $10^5 \times 5.8 \times 10^{15} \approx 5.8 \times 10^{20}$，超出 `int64` 范围（约 $9.2 \times 10^{18}$）；
-2. [`_coupon_amount`](#_periods_per_year_add_months-与-_coupon_amount) 先执行：
+2. [`_coupon_amount`](#_parse_frequency_add_months-与-_coupon_amount) 先执行：
    $$\text{product} = \text{principal.data.mul\_round}(\text{rate},\ \text{scale}=\text{digits} + 1,\ \text{rounding}=\text{"down"})$$
    再执行：
    $$\text{product.divide}(n,\ \text{scale}=\text{digits},\ \text{rounding}=\text{"half\_up"})$$
@@ -72,7 +72,7 @@
 | | [`str(cf)`、`repr(cf)` 与不可变性](#strcfreprcf-与不可变性) | 可读文本摘要、精确构造表示与只读属性保护 |
 | **付息排程生成** | [`generate_cash_flow_schedule`](#generate_cash_flow_schedule) | 按付息频率生成定期票息（`"Coupon"`）与到期本金（`"Principal"`）现金流序列 |
 | **内部辅助（私有 API）** | [`DateLike`、`_FREQ_NAMES`](#datelike-与-_freq_names类型别名与频率映射表) | 日期联合类型别名与频率名称到每年付息次数的映射字典 |
-| | [`_periods_per_year`、`_add_months` 与 `_coupon_amount`](#_periods_per_year_add_months-与-_coupon_amount) | 付息频率解析、无漂移月份推算与单次舍入等价的票息计算函数 |
+| | [`_parse_frequency`、`_add_months` 与 `_coupon_amount`](#_parse_frequency_add_months-与-_coupon_amount) | 付息频率解析、无漂移月份推算与单次舍入等价的票息计算函数 |
 
 ## 单笔现金流（`CashFlow`）
 
@@ -278,8 +278,8 @@ moneta.generate_cash_flow_schedule(
 
 **机制说明**
 
-1. 调用 [`to_date`](_utils.md#to_date) 解析 `start` 与 `end` 并验证 `start < end`，调用 [`_periods_per_year(freq)`](#_periods_per_year_add_months-与-_coupon_amount) 获取每年付息次数 $n \in \{1, 2, 4, 12\}$；
-2. 校验 `coupon`、`principal` 与 `coupon_rate` 的组合合法性；当给出 `coupon_rate` 时，调用 [`_coupon_amount(principal, FixedArray(coupon_rate), n)`](#_periods_per_year_add_months-与-_coupon_amount) 算出每期票息 `coupon`；
+1. 调用 [`to_date`](_utils.md#to_date) 解析 `start` 与 `end` 并验证 `start < end`，调用 [`_parse_frequency(freq)`](#_parse_frequency_add_months-与-_coupon_amount) 获取每年付息次数 $n \in \{1, 2, 4, 12\}$；
+2. 校验 `coupon`、`principal` 与 `coupon_rate` 的组合合法性；当给出 `coupon_rate` 时，调用 [`_coupon_amount(principal, FixedArray(coupon_rate), n)`](#_parse_frequency_add_months-与-_coupon_amount) 算出每期票息 `coupon`；
 3. 设每期月数步长 `step = 12 // n`，判断 `start` 是否为当月最后一天 `end_of_month`；从 $k = 1$ 开始循环调用 `_add_months(start, k * step, end_of_month)` 生成付息日序列 `dates`，直至 `dates[-1] >= end`，并验证 `dates[-1] == end`；
 4. 若 `coupon is not None` 则为每个日期生成 `CashFlow(coupon, d, "Coupon")`，若 `principal is not None` 则在末尾追加 `CashFlow(principal, end, "Principal")`。
 
@@ -335,7 +335,7 @@ ValueError: 不支持的付息频率 'weekly'：可选 ['monthly', 'quarterly', 
 **另请参阅**
 
 - [`CashFlow`](#cashflowamount-pay_date-label)
-- [`_coupon_amount`](#_periods_per_year_add_months-与-_coupon_amount)
+- [`_coupon_amount`](#_parse_frequency_add_months-与-_coupon_amount)
 
 ## 内部辅助函数与常量（私有 API）
 
@@ -356,15 +356,15 @@ moneta.cashflow._FREQ_NAMES = {
 - **`DateLike`**：可被 [`to_date`](_utils.md#to_date) 解析的日期输入联合类型别名。
 - **`_FREQ_NAMES`**：受支持的付息频率英文名称（小写）到每年付息次数（`12`、`4`、`2`、`1`）的映射字典。
 
-### `_periods_per_year`、`_add_months` 与 `_coupon_amount`
+### `_parse_frequency`、`_add_months` 与 `_coupon_amount`
 
 ```python
-moneta.cashflow._periods_per_year(freq)
+moneta.cashflow._parse_frequency(freq)
 moneta.cashflow._add_months(d, months, end_of_month)
 moneta.cashflow._coupon_amount(principal, rate, n)
 ```
 
-- **`_periods_per_year(freq)`**：将付息频率参数 `freq`（不区分大小写的字符串或整数 `1`、`2`、`4`、`12`，排除 `bool`）转换为每年付息次数整数；不支持的值抛出 `ValueError`。
+- **`_parse_frequency(freq)`**：将付息频率参数 `freq`（不区分大小写的字符串或整数 `1`、`2`、`4`、`12`，排除 `bool`）转换为每年付息次数整数；不支持的值抛出 `ValueError`。
 - **`_add_months(d, months, end_of_month)`**：计算日期 `d` 加上 `months` 个月后的日期：通过 `divmod(d.month - 1 + months, 12)` 算出目标年月，并查询 `calendar.monthrange(year, month)[1]` 获取该月总天数 `last`；当 `end_of_month=True` 时始终取 `last`，否则取 `min(d.day, last)`。
 - **`_coupon_amount(principal, rate, n)`**：计算每期票息 `principal × rate / n`，先执行 `product = principal.data.mul_round(rate, scale=digits + 1, rounding="down")` 将乘积按 `digits + 1` 位向零截断，再调用 `Money._wrap(product.divide(n, scale=digits), principal.currency)` 按 `half_up` 舍入到币种精度。
 
@@ -373,8 +373,8 @@ moneta.cashflow._coupon_amount(principal, rate, n)
 ```python
 >>> from datetime import date
 >>> from moneta import FixedArray, Money
->>> from moneta.cashflow import _add_months, _coupon_amount, _periods_per_year
->>> _periods_per_year(" Semi-Annual "), _periods_per_year(4)
+>>> from moneta.cashflow import _add_months, _coupon_amount, _parse_frequency
+>>> _parse_frequency(" Semi-Annual "), _parse_frequency(4)
 (2, 4)
 >>> _add_months(date(2024, 1, 31), 1, end_of_month=True), _add_months(date(2024, 1, 30), 2, end_of_month=False)
 (datetime.date(2024, 2, 29), datetime.date(2024, 3, 30))

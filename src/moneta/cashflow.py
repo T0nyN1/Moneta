@@ -82,7 +82,7 @@ class CashFlow:
         return f"CashFlow({self._amount} on {self._pay_date} [{self._label}])"
 
 
-def _periods_per_year(freq: Any) -> int:
+def _parse_frequency(freq: Any) -> int:
     """付息频率 → 每年付息次数：接受 'monthly'、'quarterly'、'semi-annual'、'annual'（不区分大小写）或 1、2、4、12。"""
     if isinstance(freq, str) and freq.strip().lower() in _FREQ_NAMES:
         return _FREQ_NAMES[freq.strip().lower()]
@@ -131,7 +131,7 @@ def generate_cash_flow_schedule(start_date: DateLike, end_date: DateLike, freq: 
     start, end = to_date(start_date, "start_date"), to_date(end_date, "end_date")
     if start >= end:
         raise ValueError(f"end_date ({end}) 必须严格晚于 start_date ({start})")
-    n = _periods_per_year(freq)
+    n = _parse_frequency(freq)
     for name, value in (("coupon", coupon), ("principal", principal)):
         if value is not None and not isinstance(value, Money):
             raise TypeError(f"{name} 必须是 Money，收到 {type(value).__name__}")
