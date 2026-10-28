@@ -151,46 +151,27 @@ Currency(code='BHD', digits=3, symbol='BD', name='Bahraini Dinar')
 >>> USD.digits = 4
 Traceback (most recent call last):
     ...
-AttributeError: Currency
-是不可变对象，禁止设置属性
-'digits'
+AttributeError: Currency 是不可变对象，禁止设置属性 'digits'
 >>> del USD._digits
 Traceback (most recent call last):
     ...
-AttributeError: Currency
-是不可变对象，禁止删除属性
-'_digits'
+AttributeError: Currency 是不可变对象，禁止删除属性 '_digits'
 >>> Currency("US", 2)
 Traceback (most recent call last):
     ...
-ValueError: 货币代码必须是
-3
-到
-5
-个英文字母，收到
-'US'
+ValueError: 货币代码必须是 3 到 5 个英文字母，收到 'US'
 >>> Currency("USD", 2.0)
 Traceback (most recent call last):
     ...
-TypeError: digits
-必须是整数，收到
-float
+TypeError: digits 必须是整数，收到 float
 >>> Currency("USD", True)
 Traceback (most recent call last):
     ...
-TypeError: digits
-不能是
-bool
+TypeError: digits 不能是 bool
 >>> Currency("ETH", 19)
 Traceback (most recent call last):
     ...
-ValueError: digits
-必须在
-0
-到
-18
-之间，收到
-19
+ValueError: digits 必须在 0 到 18 之间，收到 19
 ```
 
 **另请参阅**
@@ -363,9 +344,7 @@ False
 >>> Money(1, Currency("XYZ", 2)) + Money(1, Currency("XYZ", 3))  # 同代码但不同 digits 的未注册币种禁止混算
 Traceback (most recent call last):
     ...
-TypeError: 币种不匹配: XYZ
-与
-XYZ
+TypeError: 币种不匹配: XYZ 与 XYZ
 >>> USD == "USD"  # 与字符串比较为 False
 False
 >>> len({USD, get_currency("usd"), Currency("USD", 2, "$", "US Dollar"), CNY})
@@ -522,19 +501,11 @@ True
 >>> CurrencyRegistry.register(Currency("BHD", 2, "BD", "Bahraini Dinar"))  # 精度冲突报错
 Traceback (most recent call last):
     ...
-ValueError: 货币代码
-BHD
-已注册为
-Currency(code='BHD', digits=3, symbol='BD', name='Bahraini Dinar')，不能改注册为
-Currency(code='BHD', digits=2, symbol='BD', name='Bahraini Dinar')
+ValueError: 货币代码 BHD 已注册为 Currency(code='BHD', digits=3, symbol='BD', name='Bahraini Dinar')，不能改注册为 Currency(code='BHD', digits=2, symbol='BD', name='Bahraini Dinar')
 >>> CurrencyRegistry.register(Currency("USD", 4, "$", "US Dollar"))  # 内置币种不可覆盖
 Traceback (most recent call last):
     ...
-ValueError: 货币代码
-USD
-已注册为
-Currency(code='USD', digits=2, symbol='$', name='US Dollar')，不能改注册为
-Currency(code='USD', digits=4, symbol='$', name='US Dollar')
+ValueError: 货币代码 USD 已注册为 Currency(code='USD', digits=2, symbol='$', name='US Dollar')，不能改注册为 Currency(code='USD', digits=4, symbol='$', name='US Dollar')
 >>> CurrencyRegistry.clear()
 ```
 
@@ -591,10 +562,7 @@ KeyError: "未注册的货币代码: 'XYZ'"
 >>> CurrencyRegistry.get(Currency("USD", 3, "$", "US Dollar"))  # 与已注册定义冲突报错
 Traceback (most recent call last):
     ...
-ValueError: Currency(code='USD', digits=3, symbol='$', name='US Dollar')
-与注册表中的定义
-Currency(code='USD', digits=2, symbol='$', name='US Dollar')
-不一致
+ValueError: Currency(code='USD', digits=3, symbol='$', name='US Dollar') 与注册表中的定义 Currency(code='USD', digits=2, symbol='$', name='US Dollar') 不一致
 ```
 
 **另请参阅**
@@ -711,10 +679,7 @@ True
 >>> Money(1, Currency("USD", 3))  # 拒绝与注册表冲突的伪造 USD 实例
 Traceback (most recent call last):
     ...
-ValueError: Currency(code='USD', digits=3, symbol='', name='USD')
-与注册表中的定义
-Currency(code='USD', digits=2, symbol='$', name='US Dollar')
-不一致
+ValueError: Currency(code='USD', digits=3, symbol='', name='USD') 与注册表中的定义 Currency(code='USD', digits=2, symbol='$', name='US Dollar') 不一致
 ```
 
 **另请参阅**
@@ -848,12 +813,7 @@ True
 >>> _restore_currency("USD", 3, "$", "US Dollar")
 Traceback (most recent call last):
     ...
-ValueError: pickle
-中的
-Currency(code='USD', digits=3, symbol='$', name='US Dollar')
-与注册表中的定义
-Currency(code='USD', digits=2, symbol='$', name='US Dollar')
-不一致
+ValueError: pickle 中的 Currency(code='USD', digits=3, symbol='$', name='US Dollar') 与注册表中的定义 Currency(code='USD', digits=2, symbol='$', name='US Dollar') 不一致
 ```
 
 **另请参阅**

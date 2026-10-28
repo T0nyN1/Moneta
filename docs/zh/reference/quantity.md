@@ -920,9 +920,7 @@ Quantity._check_compatible(other)
 >>> q._check_compatible(Quantity(2, unit="share"))
 Traceback (most recent call last):
     ...
-TypeError: 单位不匹配: barrel
-与
-share
+TypeError: 单位不匹配: barrel 与 share
 ```
 
 **另请参阅**

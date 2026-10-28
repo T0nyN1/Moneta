@@ -24,9 +24,7 @@ False
 >>> m < Money("200.00", "CNY")  # 跨币种比大小直接拦截
 Traceback (most recent call last):
     ...
-TypeError: 币种不匹配: USD
-与
-CNY
+TypeError: 币种不匹配: USD 与 CNY
 ```
 
 [← API 参考](index.md)
@@ -113,7 +111,7 @@ CNY
 |                          | [`UnitArray.to_decimal`](#unitarrayto_decimal)                                                                                                                                                                                                                                                                                | 剥离单位导出为 `Decimal` 标量或 `object` 数组                        |
 |                          | [`UnitArray.to_pandas`](#unitarrayto_pandas)                                                                                                                                                                                                                                                                                  | 导出为 `pandas.Series` 或 `DataFrame`                                |
 |                          | [`UnitArray.to_polars`](#unitarrayto_polars)                                                                                                                                                                                                                                                                                  | 导出为 `polars.Series`                                               |
-|                          | [`UnitArray.__array__` 与 NumPy 防护机制](#unitarrayarray-与-numpy-防护机制)                                                                                                                                                                                                                                                  | 拦截隐式转 `ndarray` 与 `ufunc`，白名单分派 `__array_function__`     |
+|                          | [`UnitArray.__array__` 与 NumPy 防护机制](#unitarray__array__-与-numpy-防护机制)                                                                                                                                                                                                                                                  | 拦截隐式转 `ndarray` 与 `ufunc`，白名单分派 `__array_function__`     |
 | **内部辅助（私有 API）** | [`UnitArray._as_factor`](#unitarray_as_factor)                                                                                                                                                                                                                                                                                | 校验无量纲数值白名单并转为 `FixedArray`                              |
 |                          | [`UnitArray._as_grid`](#unitarray_as_grid-与-unitarray_fill_value) / [`UnitArray._fill_value`](#unitarray_as_grid-与-unitarray_fill_value)                                                                                                                                                                                    | 校验不含缺失值的网格参数 / 将 `fillna` 数值填充值换算为 `FixedArray` |
 |                          | [`UnitArray._compatible_or_none`](#unitarray_compatible_or_none)                                                                                                                                                                                                                                                              | 捕获 `_check_compatible` 异常并转为布尔返回值（供 `==` / `!=` 使用） |
@@ -291,15 +289,11 @@ UnitArray._check_compatible(other)
 >>> m_usd._check_compatible(Money("20.00", "CNY"))
 Traceback (most recent call last):
     ...
-TypeError: 币种不匹配: USD
-与
-CNY
+TypeError: 币种不匹配: USD 与 CNY
 >>> m_usd._check_compatible(Quantity(10, "share"))
 Traceback (most recent call last):
     ...
-TypeError: 操作数必须是
-Money，得到
-Quantity
+TypeError: 操作数必须是 Money，得到 Quantity
 ```
 
 **另请参阅**
@@ -1274,7 +1268,7 @@ array([0.1 , 0.25])
 **另请参阅**
 
 - [`UnitArray.to_decimal`](#unitarrayto_decimal)
-- [`UnitArray.__array__` 与 NumPy 防护机制](#unitarrayarray-与-numpy-防护机制)
+- [`UnitArray.__array__` 与 NumPy 防护机制](#unitarray__array__-与-numpy-防护机制)
 - [`FixedArray.to_float`](fixed_array.md#fixedarrayto_float)
 
 ### UnitArray.to_decimal
@@ -1486,9 +1480,7 @@ FixedArray(1.5, scale=1)
 >>> UnitArray._as_factor("1.5", "乘数")
 Traceback (most recent call last):
     ...
-TypeError: 乘数只接受数值（int、float、Decimal、Fraction、FixedArray
-或数值数组），收到
-str
+TypeError: 乘数只接受数值（int、float、Decimal、Fraction、FixedArray 或数值数组），收到 str
 ```
 
 **另请参阅**
@@ -1605,9 +1597,7 @@ NotImplemented
 >>> a._ordered(Length("2", "km"), lambda x, y: x < y)
 Traceback (most recent call last):
     ...
-TypeError: 单位不匹配: m
-与
-km
+TypeError: 单位不匹配: m 与 km
 ```
 
 **另请参阅**

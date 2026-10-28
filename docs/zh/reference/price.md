@@ -554,10 +554,7 @@ Price(FixedArray(4.1, scale=1), quote_currency='USD', base_unit='share')
 >>> Price("1.00", "USD").multiply(Quantity(3), scale=4)
 Traceback (most recent call last):
     ...
-ValueError: 结果为
-Money
-时精度固定为币种精度，不能指定
-scale
+ValueError: 结果为 Money 时精度固定为币种精度，不能指定 scale
 ```
 
 **另请参阅**

@@ -1482,9 +1482,7 @@ Money._check_compatible(other)
 >>> m._check_compatible(Money("2.00", "CNY"))
 Traceback (most recent call last):
     ...
-TypeError: 币种不匹配: USD
-与
-CNY
+TypeError: 币种不匹配: USD 与 CNY
 ```
 
 **另请参阅**
@@ -1586,9 +1584,7 @@ FixedArray(2.50, scale=2)
 >>> m.fillna("2.5")
 Traceback (most recent call last):
     ...
-TypeError: 填充值只接受数值（int、float、Decimal、Fraction、FixedArray
-或数值数组），收到
-str
+TypeError: 填充值只接受数值（int、float、Decimal、Fraction、FixedArray 或数值数组），收到 str
 ```
 
 **另请参阅**
