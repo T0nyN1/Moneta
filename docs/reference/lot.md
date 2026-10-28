@@ -431,12 +431,12 @@ PositionLot.holding_days(as_of_date)
 PositionLot.year_fraction(as_of_date, convention=DayCountConvention.ACT_365)
 ```
 
-按指定的金融计日惯例（`DayCountConvention`）计算自 `acquired_date` 至 `as_of_date` 的年化时间跨度 $\tau$。
+按指定的金融计日惯例（[`DayCountConvention`](conventions.md#daycountconvention)）计算自 `acquired_date` 至 `as_of_date` 的年化时间跨度 $\tau$，底层委托 [`year_fraction`](conventions.md#year_fraction) 实现。
 
 **参数**
 
 - **as_of_date** : *date, datetime 或 str* — 估值日期（必填）。
-- **convention** : *DayCountConvention 或 str，默认 `DayCountConvention.ACT_365`* — 计日惯例（支持 `ACT_360`、`ACT_365`、`THIRTY_360`、`ACT_ACT`）。
+- **convention** : *DayCountConvention 或 str，默认 `DayCountConvention.ACT_365`* — 计日惯例；既支持枚举成员，也接受枚举值字符串（如 `"ACT/360"`、`"ACT/365"`、`"30/360"`、`"ACT/ACT"`）或枚举成员名字符串（如 `"ACT_360"`、`"THIRTY_360"`），不区分大小写。
 
 **返回值**
 
@@ -449,13 +449,14 @@ PositionLot.year_fraction(as_of_date, convention=DayCountConvention.ACT_365)
 >>> lot = PositionLot(USD, Money(100, "USD"), "2024-01-01")
 >>> round(lot.year_fraction("2025-01-01", DayCountConvention.ACT_365), 6)  # 366 / 365
 1.00274
->>> round(lot.year_fraction("2024-07-01", DayCountConvention.ACT_360), 6)  # 182 / 360
+>>> round(lot.year_fraction("2024-07-01", "act/360"), 6)  # 182 / 360
 0.505556
 ```
 
 **另请参阅**
 
 - [`PositionLot.holding_days`](#positionlotholding_days)
+- [`DayCountConvention`](conventions.md#daycountconvention)、[`year_fraction`](conventions.md#year_fraction)
 
 ## 批次拆分与估值核算
 

@@ -158,7 +158,7 @@ class PositionLot:
         """自买入日至 as_of_date 的日历天数。"""
         return (_to_date(as_of_date, "as_of_date") - self._acquired_date).days
 
-    def year_fraction(self, as_of_date: DateLike, convention: DayCountConvention = DayCountConvention.ACT_365) -> float:
+    def year_fraction(self, as_of_date: DateLike, convention: Union[DayCountConvention, str] = DayCountConvention.ACT_365) -> float:
         """按计日惯例计算自买入日至 as_of_date 的年化分度。"""
         return _year_fraction(self._acquired_date, _to_date(as_of_date, "as_of_date"), convention)
 
