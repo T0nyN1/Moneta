@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/_static/moneta-logo.svg" width="128" alt="Moneta logo"></p>
+
 # Moneta
 
 English | [简体中文](README.zh-CN.md)
