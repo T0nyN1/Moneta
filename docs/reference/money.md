@@ -104,7 +104,7 @@ $$\text{m.scale} \equiv \text{m.currency.digits}, \qquad \text{真实金额} = \
 | **比较、导出与格式化** | [比较、索引与形状变换](#比较索引与形状变换)                                                    | `==`、`!=`、`<`、`<=`、`>`、`>=`、`m[key]`、`reshape`、`transpose`、`len`、`bool`、`iter` |
 |                        | [`Money.to_pandas`](#moneyto_pandas)                                                           | 导出为 `pandas.Series` / `DataFrame` 并自动注入 `attrs["currency"]`                       |
 |                        | [`Money.to_polars`、`to_float`、`to_decimal`](#moneyto_polarsmoneyto_float-与-moneyto_decimal) | 导出为 `polars.Series`、`float64` 或 `Decimal`                                            |
-|                        | [`Money.format`](#moneyformat)                                                                 | 调用 `MonetaryFormatter` 生成千分位/货币符号/会计括号格式字符串                           |
+|                        | [`Money.format`](#moneyformat)                                                                 | 调用 [`MonetaryFormatter`](formatter.md) 生成千分位/货币符号/会计括号格式字符串           |
 |                        | [`str(m)`、`repr(m)`](#strm-与-reprm文本表示)                                                  | 带币种代码的简明文本与完整构造表达式展示                                                  |
 | **内部钩子与私有 API** | [`Money._create_like`](#money_create_like)                                                     | `UnitArray` 钩子：用新 `FixedArray` 零拷贝包装同币种 `Money`                              |
 |                        | [`Money._check_compatible`](#money_check_compatible)                                           | `UnitArray` 钩子：校验另一对象是否为同币种 `Money`                                        |
@@ -1353,15 +1353,24 @@ Money.to_decimal()
 ### Money.format
 
 ```python
-Money.format(locale="en_US", accounting=False)
+Money.format(
+    accounting=False,
+    show_symbol=True,
+    show_code=True,
+    thousands_sep=",",
+    decimal_sep=".",
+)
 ```
 
-调用 `MonetaryFormatter.format` 将金额格式化为带货币符号、千分位分隔符或会计负数括号的展示字符串。
+调用 [`MonetaryFormatter.format`](formatter.md#monetaryformatterformat) 将 0 维标量金额格式化为带千分位分隔符、币种符号与代码或会计负数括号的展示字符串（格式化数组请使用 [`MonetaryFormatter.format_array`](formatter.md#monetaryformatterformat_array)）。
 
 **参数**
 
-- **locale** : *str，默认 `"en_US"`* — 区域格式约定。
-- **accounting** : *bool，默认 `False`* — 为 `True` 时负数采用会计括号表示（如 `($1,234.50)`）。
+- **accounting** : *bool，默认 `False`* — 为 `True` 时负数采用会计括号表示（如 `"($1,234.50 USD)"`）。
+- **show_symbol** : *bool，默认 `True`* — 是否显示前置币种符号（当 `show_code=True` 且符号等于代码时自动省略前置符号）。
+- **show_code** : *bool，默认 `True`* — 是否显示后置币种代码。
+- **thousands_sep** : *str，默认 `","`* — 千分位分隔符（可传 `""` 关闭千分位分组）。
+- **decimal_sep** : *str，默认 `"."`* — 小数点分隔符（不能为空，且不能与 `thousands_sep` 相同）。
 
 **返回值**
 
@@ -1370,12 +1379,15 @@ Money.format(locale="en_US", accounting=False)
 **示例**
 
 ```python
->>> "1,234.50" in Money("1234.50", "USD").format()
-True
+>>> Money("1234.50", "USD").format()
+'$1,234.50 USD'
+>>> Money("-1234.50", "USD").format(accounting=True)
+'($1,234.50 USD)'
 ```
 
 **另请参阅**
 
+- [`MonetaryFormatter.format`](formatter.md#monetaryformatterformat)、[`MonetaryFormatter.format_array`](formatter.md#monetaryformatterformat_array)
 - [`str(m)` 与 `repr(m)`](#strm-与-reprm文本表示)
 
 ### `str(m)` 与 `repr(m)`（文本表示）

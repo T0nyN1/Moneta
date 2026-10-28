@@ -425,10 +425,12 @@ class Money(UnitArray):
         res.attrs["currency"] = self.currency.code
         return res
 
-    def format(self, locale: str = "en_US", accounting: bool = False) -> str:
-        """调用格式化器生成格式化显示字符串。"""
+    def format(self, accounting: bool = False, show_symbol: bool = True, show_code: bool = True,
+               thousands_sep: str = ",", decimal_sep: str = ".") -> str:
+        """格式化标量金额，参数见 MonetaryFormatter.format。"""
         from .formatter import MonetaryFormatter
-        return MonetaryFormatter.format(self, locale=locale, accounting=accounting)
+        return MonetaryFormatter.format(self, accounting=accounting, show_symbol=show_symbol, show_code=show_code,
+                                        thousands_sep=thousands_sep, decimal_sep=decimal_sep)
 
     def __repr__(self) -> str:
         return f"Money({self._data!r}, currency='{self._currency.code}')"
