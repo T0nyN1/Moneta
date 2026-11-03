@@ -44,7 +44,7 @@ MODES = [m.value for m in RoundingMode]
 DECIMAL_MODES = {"half_up": ROUND_HALF_UP, "half_even": ROUND_HALF_EVEN, "down": ROUND_DOWN, "up": ROUND_UP,
                  "floor": ROUND_FLOOR, "ceil": ROUND_CEILING}
 SRC = str(Path(__file__).resolve().parents[1] / "src")
-AXIS_ERROR = getattr(getattr(np, "exceptions", np), "AxisError")  # NumPy < 1.25 没有 np.exceptions
+AXIS_ERROR = getattr(np, "exceptions", np).AxisError  # NumPy < 1.25 没有 np.exceptions
 
 
 # ===========================================================================
@@ -1443,7 +1443,7 @@ class TestMean:
                 r = a.mean(axis=axis, keepdims=keepdims, scale=6, rounding="half_even")
                 ref = base.sum(axis=axis, keepdims=keepdims)
                 count = base.size // max(np.size(ref), 1) if axis != () else 1
-                want = np.vectorize(lambda s: ref_round(Fraction(int(s), count) * 10 ** 6, "half_even"),
+                want = np.vectorize(lambda s: ref_round(Fraction(int(s), count) * 10 ** 6, "half_even"),  # noqa: B023 当场调用
                                     otypes=[object])(ref)
                 assert r.shape == np.shape(ref) and np.ravel(r.mantissa).tolist() == np.ravel(want).tolist()
 

@@ -1,4 +1,4 @@
-# 在多个 Python / NumPy / 操作系统组合上运行 pytest，验证 pyproject.toml 声明的最低版本确实可用。
+# 用 ruff 做静态检查；在多个 Python / NumPy / 操作系统组合上运行 pytest，验证 pyproject.toml 声明的最低版本确实可用。
 name: tests
 
 on:
@@ -26,6 +26,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # 规则见 pyproject.toml 的 [tool.ruff.lint]；固定小版本，避免 ruff 新增规则让 CI 无故变红
+  ruff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - run: pip install "ruff~=0.17.0"
+
+      - run: ruff check --output-format github src tests
+
   pytest:
     name: py${{ matrix.python }} · ${{ matrix.numpy }} · ${{ matrix.os }}
     runs-on: ${{ matrix.os }}

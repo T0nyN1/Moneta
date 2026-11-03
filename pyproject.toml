@@ -39,5 +39,15 @@ docs = [
 pythonpath = ["src"]
 testpaths = ["tests"]
 
+[tool.ruff.lint]
+# 只开查错类规则：F（未定义名称、未使用导入等）、E9（语法错误）、B（常见陷阱）
+select = ["F", "E9", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# with pytest.raises(...) 中故意写的比较与表达式（如 a < b、-big），用来验证会报错
+"tests/**" = ["B015", "B018"]
+# 专门测试子模块能否直接导入，导入后不使用是有意的
+"tests/test_modules.py" = ["F401"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/moneta"]
