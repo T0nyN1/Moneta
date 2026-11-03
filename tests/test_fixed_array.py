@@ -20,6 +20,7 @@ NumPy 协议、导出、展示、缺失值（NA），最后是缺陷回归测试
 固定预期行为，修复后会变成 XPASS 报错，届时删除标记并移入 TestRegressions。
 """
 
+import os
 import random
 import subprocess
 import sys
@@ -111,8 +112,9 @@ def random_mantissa(rng: random.Random) -> int:
 
 def run_isolated(code: str) -> str:
     """在独立进程中运行代码（用于检验不会卡死），返回 stdout。"""
+    # 在原有环境变量上追加 PYTHONPATH，不能整体替换：Windows 上缺少 SYSTEMROOT 时子进程的 Python 无法启动
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=20,
-                            env={"PYTHONPATH": SRC})
+                            env={**os.environ, "PYTHONPATH": SRC})
     assert result.returncode == 0, result.stderr
     return result.stdout.strip()
 
