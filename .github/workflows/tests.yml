@@ -1,0 +1,67 @@
+# 在多个 Python / NumPy / 操作系统组合上运行 pytest，验证 pyproject.toml 声明的最低版本确实可用。
+name: tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "pyproject.toml"
+      - ".github/workflows/tests.yml"
+  pull_request:
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "pyproject.toml"
+      - ".github/workflows/tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# 同一分支连续 push 时只保留最新一次运行
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    name: py${{ matrix.python }} · ${{ matrix.numpy }} · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false  # 一个组合失败不中断其他组合，一次看全所有出问题的环境
+      matrix:
+        include:
+          # 声明的最低版本。Python 3.9 已停止维护，新版 Ubuntu 镜像不再提供，固定在 24.04
+          - { os: ubuntu-24.04, python: "3.9", numpy: "numpy==1.22.*" }
+          # NumPy 1.x 在 Windows 上默认整数是 int32，漏写 dtype=np.int64 的地方会在这里暴露
+          - { os: windows-latest, python: "3.9", numpy: "numpy==1.22.*" }
+          - { os: ubuntu-latest, python: "3.10", numpy: "numpy" }
+          - { os: ubuntu-latest, python: "3.11", numpy: "numpy" }
+          - { os: ubuntu-latest, python: "3.12", numpy: "numpy" }
+          - { os: ubuntu-latest, python: "3.13", numpy: "numpy" }
+          # 最新版本，并装上可选依赖，让 to_pandas / to_polars 的测试不被跳过
+          - { os: ubuntu-latest, python: "3.14", numpy: "numpy", extras: true }
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+
+      - name: 安装依赖
+        run: pip install -e ".[test]" "${{ matrix.numpy }}"
+
+      - name: 安装可选依赖
+        if: matrix.extras
+        run: pip install -e ".[test,pandas]" polars
+
+      - name: 环境版本
+        run: python -c "import sys, numpy; print(sys.version); print('numpy', numpy.__version__)"
+
+      # -ra：结尾列出所有跳过的测试及原因
+      - name: 运行测试
+        run: pytest -ra
